@@ -250,3 +250,58 @@ async def archive_one(host: str, request: Request):
     resp = RedirectResponse(f"/sites/{host}", status_code=303)
     resp.headers["HX-Trigger"] = "jobs-changed"
     return resp
+
+
+_GRAN_DIGITS = {"year": 4, "month": 6, "day": 8, "every": 14}
+
+
+@router.post("/sites/{host}/archive-range")
+async def archive_range(host: str, request: Request):
+    form = await request.form()
+    from_d = (form.get("from_date") or "").strip()
+    to_d = (form.get("to_date") or "").strip()
+    gran = (form.get("granularity") or "month").strip()
+    try:
+        cap = int(form.get("max_count") or 100)
+    except ValueError:
+        cap = 100
+    cap = max(1, min(cap, 500))
+    digits = _GRAN_DIGITS.get(gran, 6)
+
+    def _yyyymmdd(d: str) -> str | None:
+        # d is YYYY-MM-DD from <input type=date>; CDX wants YYYYMMDD[HHMMSS].
+        return d.replace("-", "") if d and len(d) == 10 and d[4] == "-" else None
+
+    try:
+        from_ts = _yyyymmdd(from_d)
+        to_ts = _yyyymmdd(to_d)
+        snaps = wayback.list_snapshots(
+            f"https://{host}",
+            from_year=int(from_ts[:4]) if from_ts else None,
+            to_year=int(to_ts[:4]) if to_ts else None,
+            limit=cap * 2,
+            collapse_digits=digits,
+        )
+    except Exception as e:
+        from fastapi import HTTPException
+        raise HTTPException(502, f"CDX: {e}")
+
+    # CDX from/to give year-granular bounds; narrow by day precisely here.
+    def _in_range(ts: str) -> bool:
+        if from_ts and ts[:len(from_ts)] < from_ts:
+            return False
+        if to_ts and ts[:len(to_ts)] > to_ts:
+            return False
+        return True
+
+    snaps = [s for s in snaps if _in_range(s["timestamp"])][:cap]
+    from .dashboard import _default_flags
+    flags = _default_flags()
+    for s in snaps:
+        try:
+            jobs.enqueue(f"https://{host}", s["timestamp"], flags)
+        except Exception:
+            pass
+    resp = RedirectResponse(f"/sites/{host}", status_code=303)
+    resp.headers["HX-Trigger"] = "jobs-changed"
+    return resp

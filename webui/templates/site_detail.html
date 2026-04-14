@@ -15,18 +15,41 @@
 <section>
   <h3>Archive now</h3>
   <form method="post" action="/sites/{{host}}/archive" style="display:flex;gap:.5rem;align-items:end;flex-wrap:wrap">
-    <label>Snapshot
+    <label>Single snapshot
       <input type="text" name="timestamp" list="remote-ts" placeholder="YYYYMMDDHHMMSS or blank for latest" style="min-width:20rem" id="ts-input">
       <datalist id="remote-ts">
         {% for s in remote_snaps %}<option value="{{ s.timestamp }}">{{ s.timestamp[0:4] }}-{{ s.timestamp[4:6] }}-{{ s.timestamp[6:8] }} {{ s.timestamp[8:10] }}:{{ s.timestamp[10:12] }}</option>{% endfor %}
       </datalist>
     </label>
-    <label>Pick date
+    <label>Jump to date
       <input type="date" id="ts-date" min="1996-01-01" max="2099-12-31">
     </label>
-    <button type="submit">Enqueue</button>
+    <button type="submit">Enqueue one</button>
   </form>
-  <small>Leave blank to fetch the latest snapshot. Pick a date to jump to that day (Wayback will return the closest available snapshot).</small>
+  <small>Leave blank for the latest snapshot; pick a date and Wayback resolves to the closest available.</small>
+
+  <form method="post" action="/sites/{{host}}/archive-range"
+        style="display:flex;gap:.5rem;align-items:end;flex-wrap:wrap;margin-top:.8rem">
+    <label>From
+      <input type="date" name="from_date" min="1996-01-01" max="2099-12-31" required>
+    </label>
+    <label>To
+      <input type="date" name="to_date" min="1996-01-01" max="2099-12-31" required>
+    </label>
+    <label>Sampling
+      <select name="granularity">
+        <option value="year">one per year</option>
+        <option value="month" selected>one per month</option>
+        <option value="day">one per day</option>
+        <option value="every">every snapshot</option>
+      </select>
+    </label>
+    <label>Max
+      <input type="number" name="max_count" min="1" max="500" value="100" style="width:5rem">
+    </label>
+    <button type="submit" class="secondary">Enqueue range</button>
+  </form>
+  <small>Queues one archive per snapshot Wayback has in the chosen range (capped by Max).</small>
 </section>
 
 <section>
