@@ -17,10 +17,14 @@ from ..scheduler import compute_next
 def _simple_to_cron(mode: str, minute: str, time: str,
                     dows: list[str], dom: str) -> str | None:
     try:
-        m_n = max(1, min(59, int(minute or 15)))
+        m_n = int(minute or 15)
         d_n = max(1, min(31, int(dom or 1)))
     except ValueError:
         m_n, d_n = 15, 1
+    if mode == "hourly":
+        m_n = max(0, min(59, m_n))
+    else:
+        m_n = max(1, min(59, m_n))
     t = (time or "03:00").split(":")
     try:
         hh, mm = int(t[0]), int(t[1] if len(t) > 1 else 0)
@@ -30,7 +34,7 @@ def _simple_to_cron(mode: str, minute: str, time: str,
     if mode == "every-n":
         return f"*/{m_n} * * * *"
     if mode == "hourly":
-        return f"{m_n} * * * *"
+        return f"{m_n % 60} * * * *"
     if mode == "daily":
         return f"{mm} {hh} * * *"
     if mode == "weekly":
@@ -85,9 +89,13 @@ async def create(request: Request,
     if not cron_expr or not croniter.is_valid(cron_expr):
         # Fall back to Simple-form fields (no-JS path).
         form = await request.form()
+        mode_val = (form.get("mode") or "daily").strip()
+        minute_val = (form.get("minute_n") if mode_val == "every-n"
+                      else form.get("minute_h") if mode_val == "hourly"
+                      else form.get("minute")) or ""
         rebuilt = _simple_to_cron(
-            (form.get("mode") or "daily").strip(),
-            form.get("minute") or "",
+            mode_val,
+            minute_val,
             form.get("time") or "",
             form.getlist("dow"),
             form.get("dom") or "",

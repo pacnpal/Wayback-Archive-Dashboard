@@ -46,6 +46,29 @@
   #toast { position: fixed; right: 1rem; bottom: 1rem; max-width: 22rem; padding: .6rem 1rem; background: #c62828; color: #fff; border-radius: .4rem; box-shadow: 0 4px 14px rgba(0,0,0,.3); font-size: .9rem; z-index: 9999; opacity: 0; transform: translateY(1rem); transition: opacity .15s, transform .15s; pointer-events: none; }
   #toast.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
   .pager { display: flex; gap: .4rem; align-items: center; justify-content: center; margin-top: .5rem; flex-wrap: wrap; }
+
+  /* Schedule builder */
+  .sched-card { border: 1px solid var(--pico-muted-border-color); border-radius: .6rem; padding: 1rem 1.25rem; margin: 0 0 1.2rem; background: var(--pico-background-color); }
+  .sched-card > h3 { margin: 0 0 .8rem; font-size: 1rem; }
+  .sched-card label { margin: 0; }
+  .sched-row { display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-end; }
+  .sched-tabs { display: flex; gap: 0; margin: .2rem 0 .9rem; border-bottom: 1px solid var(--pico-muted-border-color); }
+  .sched-tabs a { padding: .4rem .9rem; border: 1px solid transparent; border-bottom: none; border-radius: .35rem .35rem 0 0; font-size: .9rem; color: var(--pico-muted-color); text-decoration: none; margin-bottom: -1px; }
+  .sched-tabs a.active { color: var(--pico-color); background: var(--pico-background-color); border-color: var(--pico-muted-border-color); border-bottom-color: var(--pico-background-color); }
+  .freq-picker { display: flex; gap: .4rem; flex-wrap: wrap; padding: 0; border: 0; margin: 0 0 .9rem; }
+  .freq-picker legend { display: none; }
+  .freq-picker label { border: 1px solid var(--pico-muted-border-color); border-radius: 999px; padding: .3rem .8rem; cursor: pointer; font-size: .9rem; user-select: none; }
+  .freq-picker input { position: absolute; opacity: 0; pointer-events: none; }
+  .freq-picker label:has(input:checked) { background: #2563eb; color: #fff; border-color: #2563eb; }
+  .dow-row { display: flex; gap: .3rem; flex-wrap: wrap; padding: 0; border: 0; margin: 0; }
+  .dow-row legend { display: none; }
+  .dow-row label { border: 1px solid var(--pico-muted-border-color); border-radius: .35rem; padding: .3rem .6rem; font-size: .82rem; min-width: 2.6rem; text-align: center; cursor: pointer; }
+  .dow-row label:has(input:checked) { background: #2563eb; color: #fff; border-color: #2563eb; }
+  .dow-row input { position: absolute; opacity: 0; pointer-events: none; }
+  .sched-preview { margin: 1rem 0 .2rem; padding: .6rem .9rem; border-radius: .4rem; background: rgba(37,99,235,.08); border-left: 3px solid #2563eb; font-size: .9rem; min-height: 2.5rem; }
+  .sched-preview .cron { font-family: ui-monospace, monospace; color: var(--pico-muted-color); font-size: .78rem; margin-top: .2rem; }
+  .sched-actions { display: flex; align-items: center; gap: 1rem; margin-top: 1rem; flex-wrap: wrap; }
+  .sched-actions small { color: var(--pico-muted-color); }
   @media (max-width: 600px) {
     body { margin: .5rem auto; padding: 0 .5rem; }
     .list-toolbar { gap: .4rem; }

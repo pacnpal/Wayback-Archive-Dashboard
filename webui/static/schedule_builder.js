@@ -68,9 +68,12 @@
 
     function readSimple() {
       const mode = form.querySelector('[name="mode"]:checked')?.value || 'daily';
+      const minute = mode === 'every-n'
+        ? (byName('minute_n')?.value || '15')
+        : (byName('minute_h')?.value || '0');
       return {
         mode,
-        minute: byName('minute')?.value || '15',
+        minute,
         time:   byName('time')?.value || '03:00',
         dows:   [...form.querySelectorAll('[name="dow"]:checked')].map(el => parseInt(el.value, 10)),
         dom:    byName('dom')?.value || '1',
@@ -83,18 +86,22 @@
       });
     }
 
+    const humanEl = preview?.querySelector('.human');
+    const cronEl = preview?.querySelector('.cron');
     function refresh() {
       if (form.dataset.tab === 'advanced') {
         const raw = advanced?.value.trim() || '';
         hiddenCron.value = raw;
-        preview.textContent = raw ? `→ ${humanise(raw)}` : '';
+        if (humanEl) humanEl.textContent = raw ? humanise(raw) : 'Paste a cron expression above to preview…';
+        if (cronEl) cronEl.textContent = raw;
         return;
       }
       const s = readSimple();
       toggleMode(s.mode);
       const cron = compile(s);
       hiddenCron.value = cron;
-      preview.textContent = cron ? `→ cron: ${cron}  (${humanise(cron)})` : '';
+      if (humanEl) humanEl.textContent = cron ? humanise(cron) : 'Set frequency to preview…';
+      if (cronEl) cronEl.textContent = cron ? `cron: ${cron}` : '';
     }
 
     form.addEventListener('input', refresh);
