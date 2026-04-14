@@ -84,11 +84,24 @@ def init_db() -> None:
             created_at TEXT NOT NULL
         );
         """)
-        # Recover orphans
-        c.execute(
-            "UPDATE jobs SET status='error', finished_at=? WHERE status='running'",
-            (now_iso(),),
-        )
+        # Recover orphans: jobs that were mid-run when the container stopped
+        # go back to pending so the worker picks them up again on startup.
+        orphans = [r[0] for r in c.execute(
+            "SELECT id FROM jobs WHERE status='running'"
+        ).fetchall()]
+        if orphans:
+            c.execute(
+                "UPDATE jobs SET status='pending', started_at=NULL "
+                "WHERE status='running'"
+            )
+            for jid in orphans:
+                row = c.execute("SELECT log_path FROM jobs WHERE id=?", (jid,)).fetchone()
+                if row and row["log_path"]:
+                    try:
+                        with open(row["log_path"], "a") as f:
+                            f.write(f"\n[dashboard] container restarted at {now_iso()} — job re-queued to resume\n")
+                    except Exception:
+                        pass
 
 
 def enqueue(target_url: str, timestamp: Optional[str], flags: dict, schedule_id: Optional[int] = None) -> int:
