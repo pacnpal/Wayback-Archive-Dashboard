@@ -24,6 +24,11 @@
         onchange="this.submit()">
     <input type="hidden" name="sort" value="{{sort}}">
     <input type="hidden" name="dir"  value="{{dir}}">
+    <input type="hidden" name="_filter" value="1">
+    <label style="display:inline-flex;align-items:center;gap:.35rem;margin:0">
+      <input type="checkbox" name="completed_only" value="1" {% if completed_only %}checked{% endif %}>
+      <span style="font-size:.85rem">Only completed</span>
+    </label>
     {% if hosts_all|length > 1 %}
     <div class="filter-select"><span>Host</span>
       <div class="multi-combo" data-label="All hosts">

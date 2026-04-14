@@ -55,7 +55,7 @@ def _all_snapshots() -> list[dict]:
 
 @router.get("/snapshots", response_class=HTMLResponse)
 async def sites(request: Request, page: int = 1, per_page: int = 0, host: str = "",
-                sort: str = "", dir: str = ""):
+                sort: str = "", dir: str = "", completed_only: int = -1):
     explicit_sort = bool(sort or dir)
     if not sort or not dir:
         raw = request.cookies.get("sort_snapshots") or ""
@@ -72,9 +72,11 @@ async def sites(request: Request, page: int = 1, per_page: int = 0, host: str = 
     qs_hosts: list[str] = []
     for v in request.query_params.getlist("hosts"):
         qs_hosts.extend([x for x in (p.strip() for p in v.split(",")) if x])
-    explicit_filter = bool(
+    submitted_filter = request.query_params.get("_filter") == "1"
+    explicit_filter = submitted_filter or bool(
         request.query_params.getlist("hosts") or
-        request.query_params.get("per_page")
+        request.query_params.get("per_page") or
+        request.query_params.get("completed_only")
     )
     cookie_raw = request.cookies.get("filter_snapshots") or ""
     cookie = {}
@@ -82,19 +84,31 @@ async def sites(request: Request, page: int = 1, per_page: int = 0, host: str = 
         if "=" in kv:
             k, v = kv.split("=", 1)
             cookie[k.strip()] = v.strip()
-    if not qs_hosts:
+    if not qs_hosts and not submitted_filter:
         qs_hosts = [x for x in (p.strip() for p in cookie.get("hosts", "").split(",")) if x]
     if per_page <= 0:
         try:
             per_page = int(cookie.get("per_page") or 50)
         except ValueError:
             per_page = 50
+    if completed_only < 0:
+        try:
+            completed_only = int(cookie.get("completed_only") or 0)
+        except ValueError:
+            completed_only = 0
     if host and host not in qs_hosts:  # back-compat single-value ?host=
         qs_hosts = [host]
 
     items = _all_snapshots()
     if qs_hosts:
         items = [i for i in items if i["host"] in qs_hosts]
+    if completed_only:
+        # Drop snapshots that correspond to a pending or running job row.
+        with jobs.connect() as c:
+            in_flight = {(r["host"], r["timestamp"]) for r in c.execute(
+                "SELECT host, timestamp FROM jobs WHERE status IN ('pending','running')"
+            ).fetchall()}
+        items = [i for i in items if (i["host"], i["ts"]) not in in_flight]
     key_map = {
         "host": lambda r: (r["host"], r["ts"]),
         "ts": lambda r: (r["ts"], r["host"]),
@@ -113,13 +127,13 @@ async def sites(request: Request, page: int = 1, per_page: int = 0, host: str = 
         "request": request, "items": slice_, "page": page, "pages": pages,
         "per_page": per_page, "total": total,
         "selected_hosts": qs_hosts, "hosts_all": hosts_all,
-        "sort": sort, "dir": dir,
+        "sort": sort, "dir": dir, "completed_only": completed_only,
     })
     if explicit_sort:
         resp.set_cookie("sort_snapshots", f"{sort}:{dir}",
                         max_age=60 * 60 * 24 * 365, samesite="lax")
     if explicit_filter:
-        val = f"hosts={','.join(qs_hosts)};per_page={per_page}"
+        val = f"hosts={','.join(qs_hosts)};per_page={per_page};completed_only={completed_only}"
         resp.set_cookie("filter_snapshots", val,
                         max_age=60 * 60 * 24 * 365, samesite="lax")
     return resp
