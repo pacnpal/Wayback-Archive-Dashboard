@@ -121,11 +121,16 @@
   const wrap = document.querySelector('.jobs-wrap');
   let saved = null;
   wrap.addEventListener('htmx:configRequest', e => {
-    // If any row is selected, skip the auto-refresh entirely (manual reloads via
-    // filter/page links pass their own target and should still go through).
-    if (e.detail.triggeringEvent && e.detail.triggeringEvent.type === 'htmx:trigger'
-        && wrap.querySelector('input[name=job_id]:checked')) {
-      e.preventDefault();
+    // Skip auto-refresh (timer) when it would wipe in-flight UI state:
+    //   - a row is selected, or
+    //   - a multi-select dropdown is open.
+    // Manual reloads (clicking filter/pager/sort links) trigger via the link's
+    // own htmx attributes, not the wrap's timer, so they still fire.
+    if (e.detail.triggeringEvent && e.detail.triggeringEvent.type === 'htmx:trigger') {
+      if (wrap.querySelector('input[name=job_id]:checked') ||
+          wrap.querySelector('.multi-combo.open')) {
+        e.preventDefault();
+      }
     }
   });
   wrap.addEventListener('htmx:beforeSwap', () => {
