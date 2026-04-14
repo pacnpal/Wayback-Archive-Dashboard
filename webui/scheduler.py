@@ -5,7 +5,9 @@ import json
 from datetime import datetime, timezone
 from croniter import croniter
 
-from . import jobs
+from . import jobs, log as _log
+
+logger = _log.get("scheduler")
 
 
 def _parse(ts: str | None) -> datetime | None:
@@ -32,6 +34,8 @@ async def scheduler_loop(stop: asyncio.Event) -> None:
             flags = json.loads(s["flags_json"])
             job_id = jobs.enqueue(s["target_url"], None, flags, schedule_id=s["id"])
             nxt = compute_next(s["cron_expr"], now)
+            logger.info("schedule=%d url=%s -> job=%d next=%s",
+                        s["id"], s["target_url"], job_id, nxt)
             with jobs.connect() as c:
                 c.execute(
                     "UPDATE schedules SET last_run_at=?, last_job_id=?, next_run_at=? WHERE id=?",

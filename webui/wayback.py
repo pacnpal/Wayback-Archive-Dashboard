@@ -6,6 +6,9 @@ import urllib.parse
 import urllib.request
 from typing import Optional
 from urllib.parse import urlparse
+from . import log as _log
+
+logger = _log.get("wayback")
 
 _CACHE: dict[str, tuple[float, list[dict]]] = {}
 _TTL = 600
@@ -73,8 +76,10 @@ def list_snapshots(url: str, from_year: Optional[int] = None, to_year: Optional[
             break
         except Exception as e:
             last_err = e
+            logger.warning("cdx retry attempt=%d err=%s", attempt + 1, e)
             time.sleep(1.5 * (attempt + 1))
     else:
+        logger.error("wayback unreachable: %s", last_err)
         raise WaybackUnreachable(
             f"Wayback Machine (web.archive.org) is not reachable right now: {last_err}. "
             f"This is usually a temporary Internet Archive outage — try again in a few minutes."

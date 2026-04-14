@@ -223,7 +223,10 @@ async def create_job(request: Request):
         target = "https://" + target
     ts = (form.get("timestamp") or "").strip() or None
     flags = _collect_flags(form)
-    jobs.enqueue(target, ts, flags)
+    try:
+        jobs.enqueue(target, ts, flags)
+    except Exception as e:
+        raise HTTPException(502, f"could not enqueue: {e}")
     return RedirectResponse("/", status_code=303)
 
 

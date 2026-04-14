@@ -151,6 +151,11 @@ async def rewrite_links(host: str, ts: str = ""):
         totals["files_scanned"] += r["files_scanned"]
         totals["files_changed"] += r["files_changed"]
         totals["refs_rewritten"] += r["refs_rewritten"]
+    from .. import log as _log
+    _log.get("rewrite").info(
+        "rewrite host=%s snapshots=%d files_changed=%d refs=%d",
+        host, totals["snapshots"], totals["files_changed"], totals["refs_rewritten"],
+    )
     qs = "&".join(f"{k}={v}" for k, v in totals.items())
     return RedirectResponse(f"/sites/{host}?rewrite_done=1&{qs}", status_code=303)
 

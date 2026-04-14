@@ -5,6 +5,7 @@ services:
     container_name: wayback-archive
     environment:
       OUTPUT_DIR: /app/output
+      # LOG_LEVEL: INFO   # DEBUG | INFO | WARNING | ERROR
     ports:
       - "8765:8765"
     volumes:

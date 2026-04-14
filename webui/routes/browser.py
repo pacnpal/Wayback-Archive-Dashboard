@@ -98,6 +98,8 @@ def _delete_snapshot(host: str, ts: str) -> bool:
     target = (jobs.OUTPUT_ROOT / host / ts).resolve()
     if base not in target.parents or not target.is_dir():
         return False
+    from .. import log as _log
+    _log.get("snapshots").info("delete snapshot host=%s ts=%s", host, ts)
     shutil.rmtree(target)
     try:
         from .. import sites_index

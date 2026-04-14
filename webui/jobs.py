@@ -34,6 +34,9 @@ UPSTREAM_FLAGS = [
     "MAKE_NON_WWW", "MAKE_WWW", "KEEP_REDIRECTIONS", "MAX_FILES",
 ]
 
+from . import log as _log
+logger = _log.get("jobs")
+
 _running: dict[int, asyncio.subprocess.Process] = {}
 _cancelled: set[int] = set()
 
@@ -90,6 +93,7 @@ def init_db() -> None:
             "SELECT id FROM jobs WHERE status='running'"
         ).fetchall()]
         if orphans:
+            logger.info("resumed %d orphaned running jobs", len(orphans))
             c.execute(
                 "UPDATE jobs SET status='pending', started_at=NULL "
                 "WHERE status='running'"
@@ -138,7 +142,9 @@ def enqueue(target_url: str, timestamp: Optional[str], flags: dict, schedule_id:
             (target_url, resolved_ts, wb, host, site_dir, log_path,
              json.dumps(flags), now_iso(), schedule_id),
         )
-        return cur.lastrowid
+        jid = cur.lastrowid
+    logger.info("enqueue job=%d url=%s ts=%s", jid, target_url, resolved_ts)
+    return jid
 
 
 JOB_SORT_COLS = {
@@ -180,6 +186,7 @@ def delete_many(ids: list[int]) -> int:
     """Delete job rows. Leaves any archived files on disk — use /snapshots to remove them."""
     if not ids:
         return 0
+    logger.info("delete jobs=%s", ids)
     # Cancel any still-active runs first so we don't leave orphaned subprocesses.
     for jid in ids:
         with connect() as c:
@@ -194,6 +201,7 @@ def delete_many(ids: list[int]) -> int:
 def cancel_many(ids: list[int]) -> int:
     if not ids:
         return 0
+    logger.info("cancel jobs=%s", ids)
     cancelled = 0
     for jid in ids:
         _cancelled.add(jid)
@@ -255,11 +263,13 @@ async def _run_one(job: sqlite3.Row) -> None:
     for k, v in json.loads(job["flags_json"]).items():
         if k in UPSTREAM_FLAGS and v not in (None, ""):
             env[k] = str(v)
+    start_time = time.monotonic()
     with connect() as c:
         c.execute(
             "UPDATE jobs SET status='running', started_at=? WHERE id=?",
             (now_iso(), job["id"]),
         )
+    logger.info("start job=%d host=%s ts=%s", job["id"], job["host"], job["timestamp"])
     log_f = open(job["log_path"], "ab", buffering=0)
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -287,6 +297,9 @@ async def _run_one(job: sqlite3.Row) -> None:
             "UPDATE jobs SET status=?, finished_at=? WHERE id=?",
             (status, now_iso(), job["id"]),
         )
+    dur = time.monotonic() - start_time
+    logger.info("done job=%d status=%s duration=%.1fs rc=%s",
+                job["id"], status, dur, rc)
 
 
 def _get_setting(key: str, default: str) -> str:
@@ -302,6 +315,7 @@ def set_setting(key: str, value: str) -> None:
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (key, value),
         )
+    logger.info("setting %s=%s", key, value)
 
 
 def get_max_concurrent() -> int:

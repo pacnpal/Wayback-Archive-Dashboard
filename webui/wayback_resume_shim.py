@@ -6,11 +6,44 @@ of being re-downloaded from Wayback.
 Usage (from webui.jobs): python -m webui.wayback_resume_shim
 """
 from __future__ import annotations
+import logging
 import os
 import re
 import sys
+import time
 from pathlib import Path
 from urllib.parse import urlparse
+
+
+def _setup_logger() -> logging.Logger:
+    """Child-process logger: writes to stderr (captured in the per-job .log
+    because jobs.py merges stderr into it) AND to /proc/1/fd/1 so lines
+    reach docker logs even though stdout is redirected to a file."""
+    lg = logging.getLogger("wayback.shim")
+    if lg.handlers:
+        return lg
+    lg.setLevel(os.environ.get("LOG_LEVEL", "INFO").upper())
+    fmt = logging.Formatter(
+        "%(asctime)s %(levelname)-7s wayback.shim: %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%SZ",
+    )
+    # stderr handler — ends up in the per-job .log (jobs.py merges stderr).
+    h1 = logging.StreamHandler(sys.stderr)
+    h1.setFormatter(fmt)
+    lg.addHandler(h1)
+    # docker logs handler — write to init's stdout inside the container.
+    try:
+        f = open("/proc/1/fd/1", "w", buffering=1)
+        h2 = logging.StreamHandler(f)
+        h2.setFormatter(fmt)
+        lg.addHandler(h2)
+    except Exception:
+        pass
+    return lg
+
+
+log = _setup_logger()
+_cache_hits = 0
 
 
 def _patch() -> None:
@@ -31,6 +64,9 @@ def _patch() -> None:
             ).geturl()
             local_path = self._get_local_path(normalized)
             if local_path.is_file() and local_path.stat().st_size > 0:
+                global _cache_hits
+                _cache_hits += 1
+                log.debug("cache-hit %s", local_path)
                 print(
                     f"         [resumed from disk] {local_path}",
                     flush=True,
@@ -93,21 +129,24 @@ def _purge_partial_last_file() -> None:
         normalized = parsed._replace(netloc=netloc, fragment="", query="").geturl()
         local_path = d._get_local_path(normalized)
         if local_path.is_file():
-            print(
-                f"[dashboard] purging suspected in-flight file before resume: "
-                f"{local_path}",
-                flush=True,
-            )
+            log.warning("purge in-flight file=%s", local_path)
             local_path.unlink()
     except Exception as e:
-        print(f"[dashboard] could not purge in-flight file: {e}", flush=True)
+        log.warning("could not purge in-flight file: %s", e)
 
 
 def main() -> None:
     _patch()
     _purge_partial_last_file()
+    host = os.environ.get("OUTPUT_DIR", "?").rstrip("/").split("/")[-2] if "/" in os.environ.get("OUTPUT_DIR", "") else "?"
+    log.info("shim start output=%s", os.environ.get("OUTPUT_DIR"))
+    t0 = time.monotonic()
     from wayback_archive.cli import main as cli_main
-    cli_main()
+    try:
+        cli_main()
+    finally:
+        log.info("shim end cache_hits=%d duration=%.1fs",
+                 _cache_hits, time.monotonic() - t0)
 
 
 if __name__ == "__main__":

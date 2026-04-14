@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from . import jobs, scheduler
+from . import jobs, scheduler, log as log_mod
 from .routes import dashboard, browser, schedules as schedules_routes, diff, sites as sites_routes
 
 BASE = Path(__file__).parent
@@ -15,6 +15,7 @@ BASE = Path(__file__).parent
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    log_mod.configure()
     jobs.init_db()
     stop = asyncio.Event()
     t1 = asyncio.create_task(jobs.worker_loop(stop))
