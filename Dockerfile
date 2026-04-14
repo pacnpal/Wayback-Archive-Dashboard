@@ -21,6 +21,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         libjpeg62-turbo \
         fonts-noto-color-emoji
 
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip
+
 # Upstream engine — pip wheels cached between builds.
 RUN --mount=type=cache,target=/root/.cache/pip \
     git clone --depth 1 https://github.com/GeiserX/Wayback-Archive.git /tmp/wa \
