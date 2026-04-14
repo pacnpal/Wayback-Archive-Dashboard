@@ -120,23 +120,17 @@
 (function() {
   const wrap = document.querySelector('.jobs-wrap');
   let saved = null;
-  wrap.addEventListener('htmx:configRequest', e => {
-    // Skip auto-refresh (timer) when it would wipe in-flight UI state:
-    //   - a row is selected, or
-    //   - a multi-select dropdown is open.
-    // Manual reloads (clicking filter/pager/sort links) trigger via the link's
-    // own htmx attributes, not the wrap's timer, so they still fire.
-    if (e.detail.triggeringEvent && e.detail.triggeringEvent.type === 'htmx:trigger') {
-      if (wrap.querySelector('input[name=job_id]:checked') ||
-          wrap.querySelector('.multi-combo.open')) {
-        e.preventDefault();
-      }
-    }
-  });
+  // Save/restore state across every auto-refresh swap: row selections AND
+  // which filter dropdown (if any) was open.
+  let openComboKey = null;
   wrap.addEventListener('htmx:beforeSwap', () => {
     saved = new Set(
       [...wrap.querySelectorAll('input[name=job_id]:checked')].map(c => c.value)
     );
+    const openCombo = wrap.querySelector('.multi-combo.open');
+    openComboKey = openCombo
+      ? (openCombo.querySelector('input[name]')?.name || null)
+      : null;
   });
   wrap.addEventListener('htmx:afterSwap', () => {
     // Sync the auto-refresh URL to whatever the user just loaded.
@@ -150,6 +144,12 @@
         if (saved.has(c.value)) c.checked = true;
       });
       saved = null;
+    }
+    if (openComboKey) {
+      const input = wrap.querySelector(`.multi-combo input[name="${openComboKey}"]`);
+      const combo = input?.closest('.multi-combo');
+      if (combo) combo.classList.add('open');
+      openComboKey = null;
     }
   });
 })();
