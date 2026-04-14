@@ -1,0 +1,11 @@
+services:
+  wayback-archive:
+    build: .
+    image: wayback-archive:local
+    container_name: wayback-archive
+    env_file: .env
+    environment:
+      OUTPUT_DIR: /app/output
+    volumes:
+      - ./output:/app/output
+    restart: "no"
