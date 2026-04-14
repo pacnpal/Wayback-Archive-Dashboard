@@ -31,7 +31,13 @@ HOSTS_SORT_KEYS = {"host", "count", "newest"}
 
 
 @router.get("/sites", response_class=HTMLResponse)
-async def sites_index_route(request: Request, sort: str = "host", dir: str = "asc"):
+async def sites_index_route(request: Request, sort: str = "", dir: str = ""):
+    explicit = bool(sort or dir)
+    if not sort or not dir:
+        raw = request.cookies.get("sort_sites") or ""
+        c, _, d = raw.partition(":")
+        sort = sort or c or "host"
+        dir = dir or d or "asc"
     if sort not in HOSTS_SORT_KEYS:
         sort = "host"
     if dir not in ("asc", "desc"):
@@ -44,18 +50,27 @@ async def sites_index_route(request: Request, sort: str = "host", dir: str = "as
         "newest": lambda t: t[2],
     }
     hosts.sort(key=key_map[sort], reverse=reverse)
-    return templates.TemplateResponse("sites_index.html", {
+    resp = templates.TemplateResponse("sites_index.html", {
         "request": request, "hosts": hosts, "sort": sort, "dir": dir,
     })
+    if explicit:
+        resp.set_cookie("sort_sites", f"{sort}:{dir}",
+                        max_age=60 * 60 * 24 * 365, samesite="lax")
+    return resp
 
 
 @router.get("/sites/{host}", response_class=HTMLResponse)
 async def site_detail(request: Request, host: str,
-                      sort: str = "ts", dir: str = "desc",
+                      sort: str = "", dir: str = "",
                       page: int = 1, per_page: int = 50,
                       remote: int = 0, from_year: str = "", to_year: str = ""):
+    explicit = bool(sort or dir)
+    if not sort or not dir:
+        raw = request.cookies.get("sort_site_detail") or ""
+        c, _, d = raw.partition(":")
+        sort = sort or c or "ts"
+        dir = dir or d or "desc"
     idx = sites_index.get_index(host)
-    # Normalise sort + direction.
     if sort not in SORT_KEYS:
         sort = "ts"
     if dir not in ("asc", "desc"):
@@ -97,7 +112,7 @@ async def site_detail(request: Request, host: str,
             by_day[f"{ts[0:4]}-{ts[4:6]}-{ts[6:8]}"].append(s)
         days_sorted = sorted(by_day.keys(), reverse=True)
 
-    return templates.TemplateResponse("site_detail.html", {
+    resp = templates.TemplateResponse("site_detail.html", {
         "request": request,
         "host": host,
         "rows": rows_page,
@@ -112,6 +127,10 @@ async def site_detail(request: Request, host: str,
         "from_year": from_year,
         "to_year": to_year,
     })
+    if explicit:
+        resp.set_cookie("sort_site_detail", f"{sort}:{dir}",
+                        max_age=60 * 60 * 24 * 365, samesite="lax")
+    return resp
 
 
 @router.post("/sites/{host}/rewrite-links")

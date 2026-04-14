@@ -53,7 +53,13 @@ def _all_snapshots() -> list[dict]:
 
 @router.get("/snapshots", response_class=HTMLResponse)
 async def sites(request: Request, page: int = 1, per_page: int = 50, host: str = "",
-                sort: str = "ts", dir: str = "desc"):
+                sort: str = "", dir: str = ""):
+    explicit = bool(sort or dir)
+    if not sort or not dir:
+        raw = request.cookies.get("sort_snapshots") or ""
+        c, _, d = raw.partition(":")
+        sort = sort or c or "ts"
+        dir = dir or d or "desc"
     if sort not in SNAP_SORT_KEYS:
         sort = "ts"
     if dir not in ("asc", "desc"):
@@ -76,11 +82,15 @@ async def sites(request: Request, page: int = 1, per_page: int = 50, host: str =
     start = (page - 1) * per_page
     slice_ = items[start:start + per_page]
     hosts_all = sorted({r["host"] for r in _all_snapshots()})
-    return templates.TemplateResponse("snapshots.html", {
+    resp = templates.TemplateResponse("snapshots.html", {
         "request": request, "items": slice_, "page": page, "pages": pages,
         "per_page": per_page, "total": total, "host": host, "hosts_all": hosts_all,
         "sort": sort, "dir": dir,
     })
+    if explicit:
+        resp.set_cookie("sort_snapshots", f"{sort}:{dir}",
+                        max_age=60 * 60 * 24 * 365, samesite="lax")
+    return resp
 
 
 def _delete_snapshot(host: str, ts: str) -> bool:

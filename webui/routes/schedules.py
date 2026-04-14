@@ -22,7 +22,13 @@ SCHED_SORT_COLS = {
 
 
 @router.get("/schedules", response_class=HTMLResponse)
-async def list_schedules(request: Request, sort: str = "id", dir: str = "desc"):
+async def list_schedules(request: Request, sort: str = "", dir: str = ""):
+    explicit = bool(sort or dir)
+    if not sort or not dir:
+        raw = request.cookies.get("sort_schedules") or ""
+        cs, _, cd = raw.partition(":")
+        sort = sort or cs or "id"
+        dir = dir or cd or "desc"
     col = SCHED_SORT_COLS.get(sort, "id")
     if dir not in ("asc", "desc"):
         dir = "desc"
@@ -31,9 +37,13 @@ async def list_schedules(request: Request, sort: str = "id", dir: str = "desc"):
         rows = c.execute(
             f"SELECT * FROM schedules ORDER BY {col} {direction}, id DESC"
         ).fetchall()
-    return templates.TemplateResponse("schedules.html", {
+    resp = templates.TemplateResponse("schedules.html", {
         "request": request, "schedules": rows, "sort": sort, "dir": dir,
     })
+    if explicit:
+        resp.set_cookie("sort_schedules", f"{sort}:{dir}",
+                        max_age=60 * 60 * 24 * 365, samesite="lax")
+    return resp
 
 
 @router.post("/schedules")
