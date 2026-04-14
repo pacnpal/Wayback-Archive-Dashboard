@@ -263,7 +263,7 @@ async def _run_one(job: sqlite3.Row) -> None:
     log_f = open(job["log_path"], "ab", buffering=0)
     try:
         proc = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", "wayback_archive.cli",
+            sys.executable, "-m", "webui.wayback_resume_shim",
             env=env, stdout=log_f, stderr=asyncio.subprocess.STDOUT,
         )
         _running[job["id"]] = proc
