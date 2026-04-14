@@ -1,0 +1,40 @@
+
+======================================================================
+Wayback-Archive Downloader
+======================================================================
+Starting URL: http://www.compaq.com
+Output directory: /app/output/www.compaq.com/20260414121957
+⚠️  TEST MODE: Limited to 3 files
+======================================================================
+
+[1 (limit: 3)] Downloading HTML: http://www.compaq.com
+         ✓ Downloaded (20.7 KB)
+         Processing HTML and extracting links...
+         Found 22 new links to download
+[2 (limit: 3)] Downloading HTML: https://www.compaq.com/images/Desktop_Compaq
+         Queue: 14 files remaining
+         ⚠️  Failed to download
+[3 (limit: 3)] Downloading Image: https://www.compaq.com/images/Desktop_licensing.jpg
+         Queue: 13 files remaining
+         ✓ Downloaded (76.9 KB)
+[4 (limit: 3)] Downloading HTML: https://www.compaq.com/images/Desktop_Smart
+         Queue: 12 files remaining
+         ⚠️  Failed to download
+[5 (limit: 3)] Downloading Image: https://www.compaq.com/images/Desktop_tablets.jpg
+         Queue: 11 files remaining
+         ✓ Downloaded (41.0 KB)
+
+======================================================================
+⚠️  Reached MAX_FILES limit (3) - stopping download
+======================================================================
+
+======================================================================
+Download Complete!
+======================================================================
+Output directory: /app/output/www.compaq.com/20260414121957
+Files successfully downloaded: 3
+Files failed: 2
+Files skipped (duplicates): 0
+Total files processed: 5
+======================================================================
+

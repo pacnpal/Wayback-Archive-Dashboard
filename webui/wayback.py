@@ -16,11 +16,27 @@ def host_of(url: str) -> str:
     return h.lower().lstrip(".")
 
 
+def latest_timestamp(target_url: str) -> Optional[str]:
+    try:
+        snaps = list_snapshots(target_url, limit=1)
+    except Exception:
+        return None
+    # CDX returns oldest-first; ask for last by re-querying without limit is expensive.
+    # Instead query with high limit and pick max; but our cache makes this cheap.
+    try:
+        snaps = list_snapshots(target_url, limit=10000)
+    except Exception:
+        return None
+    if not snaps:
+        return None
+    return max(s["timestamp"] for s in snaps)
+
+
 def build_wayback_url(target_url: str, timestamp: Optional[str] = None) -> str:
-    ts = timestamp or "2"  # "2" = pick oldest; empty string redirects to latest
-    if not timestamp:
-        ts = ""
-    return f"https://web.archive.org/web/{ts}/{target_url}" if ts else f"https://web.archive.org/web/{target_url}"
+    ts = timestamp or latest_timestamp(target_url)
+    if not ts:
+        raise ValueError(f"No Wayback snapshots found for {target_url}")
+    return f"https://web.archive.org/web/{ts}/{target_url}"
 
 
 def list_snapshots(url: str, from_year: Optional[int] = None, to_year: Optional[int] = None, limit: int = 500) -> list[dict]:

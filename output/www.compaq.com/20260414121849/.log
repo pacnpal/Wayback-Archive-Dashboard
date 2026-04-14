@@ -1,0 +1,13 @@
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/usr/local/lib/python3.12/site-packages/wayback_archive/cli.py", line 35, in <module>
+    main()
+  File "/usr/local/lib/python3.12/site-packages/wayback_archive/cli.py", line 22, in main
+    downloader = WaybackDownloader(config)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/site-packages/wayback_archive/downloader.py", line 71, in __init__
+    self._parse_wayback_url()
+  File "/usr/local/lib/python3.12/site-packages/wayback_archive/downloader.py", line 102, in _parse_wayback_url
+    raise ValueError(f"Invalid Wayback URL format: {self.config.wayback_url}")
+ValueError: Invalid Wayback URL format: https://web.archive.org/web/http://www.compaq.com
