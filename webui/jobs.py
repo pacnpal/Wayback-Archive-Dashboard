@@ -35,6 +35,7 @@ UPSTREAM_FLAGS = [
 ]
 
 from . import log as _log
+from . import events_bus
 logger = _log.get("jobs")
 
 _running: dict[int, asyncio.subprocess.Process] = {}
@@ -153,6 +154,7 @@ def enqueue(target_url: str, timestamp: Optional[str], flags: dict, schedule_id:
         )
         jid = cur.lastrowid
     logger.info("enqueue job=%d url=%s ts=%s", jid, target_url, resolved_ts)
+    events_bus.publish("jobs-changed")
     return jid
 
 
@@ -192,6 +194,7 @@ def enqueue_repair(host: str, timestamp: str, rel_paths: list[str], flags: Optio
         jid = cur.lastrowid
     logger.info("enqueue repair job=%d host=%s ts=%s paths=%d",
                 jid, host, timestamp, len(rel_paths))
+    events_bus.publish("jobs-changed")
     return jid
 
 
@@ -262,6 +265,7 @@ def delete_many(ids: list[int]) -> int:
     if not ids:
         return 0
     logger.info("delete jobs=%s", ids)
+    events_bus.publish("jobs-changed")
     # Cancel any still-active runs first so we don't leave orphaned subprocesses.
     for jid in ids:
         with connect() as c:
@@ -277,6 +281,7 @@ def cancel_many(ids: list[int]) -> int:
     if not ids:
         return 0
     logger.info("cancel jobs=%s", ids)
+    events_bus.publish("jobs-changed")
     cancelled = 0
     for jid in ids:
         _cancelled.add(jid)
@@ -410,6 +415,7 @@ async def _run_one(job: sqlite3.Row) -> None:
     dur = time.monotonic() - start_time
     logger.info("done job=%d status=%s duration=%.1fs rc=%s",
                 job["id"], status, dur, rc)
+    events_bus.publish("jobs-changed")
 
 
 def _get_setting(key: str, default: str) -> str:

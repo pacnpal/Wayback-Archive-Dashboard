@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 import asyncio as _asyncio
 import json as _json
 from . import jobs, scheduler, log as log_mod, job_progress
-from .routes import dashboard, browser, schedules as schedules_routes, diff, sites as sites_routes
+from .routes import dashboard, browser, schedules as schedules_routes, diff, sites as sites_routes, events as events_routes
 
 BASE = Path(__file__).parent
 
@@ -115,3 +115,4 @@ app.include_router(browser.router)
 app.include_router(schedules_routes.router)
 app.include_router(diff.router)
 app.include_router(sites_routes.router)
+app.include_router(events_routes.router)
