@@ -7,7 +7,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from .. import jobs, wayback, sites_index
+from .. import jobs, wayback, sites_index, link_rewrite
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
@@ -97,6 +97,28 @@ async def site_detail(request: Request, host: str,
         "from_year": from_year,
         "to_year": to_year,
     })
+
+
+@router.post("/sites/{host}/rewrite-links")
+async def rewrite_links(host: str, ts: str = ""):
+    """Rewrite absolute-path URLs inside archived HTML/CSS to relative paths,
+    so pages render correctly when served from /sites/{host}/view. Applies to
+    a single snapshot if `ts` is given, otherwise every snapshot of the host."""
+    host_dir = jobs.OUTPUT_ROOT / host
+    if not host_dir.is_dir():
+        return RedirectResponse(f"/sites/{host}", status_code=303)
+    targets = [host_dir / ts] if ts else [p for p in host_dir.iterdir() if p.is_dir()]
+    totals = {"snapshots": 0, "files_scanned": 0, "files_changed": 0, "refs_rewritten": 0}
+    for snap in targets:
+        if not snap.is_dir():
+            continue
+        r = link_rewrite.rewrite_snapshot(snap)
+        totals["snapshots"] += 1
+        totals["files_scanned"] += r["files_scanned"]
+        totals["files_changed"] += r["files_changed"]
+        totals["refs_rewritten"] += r["refs_rewritten"]
+    qs = "&".join(f"{k}={v}" for k, v in totals.items())
+    return RedirectResponse(f"/sites/{host}?rewrite_done=1&{qs}", status_code=303)
 
 
 @router.post("/sites/{host}/archive")

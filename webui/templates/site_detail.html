@@ -47,7 +47,23 @@
 </section>
 
 <section>
-  <h3>Local snapshots <small style="font-weight:normal;color:var(--pico-muted-color)">— {{ total }}</small></h3>
+  <h3 style="display:flex;gap:.5rem;align-items:center">
+    Local snapshots <small style="font-weight:normal;color:var(--pico-muted-color)">— {{ total }}</small>
+    {% if total %}
+    <form method="post" action="/sites/{{host}}/rewrite-links" style="margin-left:auto"
+          onsubmit="return confirm('Rewrite absolute URLs inside HTML/CSS of ALL {{total}} snapshots of {{host}}?');">
+      <button type="submit" class="secondary" style="padding:.2rem .6rem;font-size:.85rem">Fix links in all snapshots</button>
+    </form>
+    {% endif %}
+  </h3>
+  {% if request.query_params.get('rewrite_done') %}
+    <p class="status-ok"><strong>Done.</strong>
+      Rewrote {{ request.query_params.get('refs_rewritten') }} absolute-path refs
+      across {{ request.query_params.get('files_changed') }} of
+      {{ request.query_params.get('files_scanned') }} HTML/CSS files in
+      {{ request.query_params.get('snapshots') }} snapshot(s).
+    </p>
+  {% endif %}
 
   {% if total == 0 %}
   <p>None archived yet.</p>
@@ -72,6 +88,12 @@
         <td>
           <a href="/sites/{{host}}/view?ts={{ts}}">view</a>
           &middot; <a href="/sites/{{host}}/tree?ts={{ts}}">browse</a>
+          &middot;
+          <form method="post" action="/sites/{{host}}/rewrite-links" style="display:inline"
+                onsubmit="return confirm('Rewrite absolute URLs inside HTML/CSS of this snapshot in place?');">
+            <input type="hidden" name="ts" value="{{ts}}">
+            <button type="submit" class="secondary" style="padding:.1rem .4rem;font-size:.8rem">fix links</button>
+          </form>
         </td>
       </tr>
       {% endfor %}
