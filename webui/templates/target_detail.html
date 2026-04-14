@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}{{ host }}{% endblock %}
+{% block content %}
+<h2>{{ host }}</h2>
+<p><a href="/targets">← all targets</a> · <a href="/sites?host={{host}}">manage local snapshots</a></p>
+
+<section>
+  <h3>Archive now</h3>
+  <form method="post" action="/targets/{{host}}/archive" style="display:flex;gap:.5rem;align-items:end;flex-wrap:wrap">
+    <label>Snapshot
+      <input type="text" name="timestamp" list="remote-ts" placeholder="YYYYMMDDHHMMSS or blank for latest" style="min-width:20rem" id="ts-input">
+      <datalist id="remote-ts">
+        {% for s in remote_snaps %}<option value="{{ s.timestamp }}">{{ s.timestamp[0:4] }}-{{ s.timestamp[4:6] }}-{{ s.timestamp[6:8] }} {{ s.timestamp[8:10] }}:{{ s.timestamp[10:12] }}</option>{% endfor %}
+      </datalist>
+    </label>
+    <label>Pick date
+      <input type="date" id="ts-date" min="{% if remote_snaps %}{{ remote_snaps[0].timestamp[0:4] }}-{{ remote_snaps[0].timestamp[4:6] }}-{{ remote_snaps[0].timestamp[6:8] }}{% endif %}">
+    </label>
+    <button type="submit">Enqueue</button>
+  </form>
+  <small>Leave blank to fetch the latest snapshot.</small>
+</section>
+
+<section>
+  <h3>Local snapshots ({{ local|length }})</h3>
+  {% if not local %}<p>None archived yet.</p>{% else %}
+  <ul class="mono" style="columns: 2; -webkit-columns: 2; list-style: none; padding-left: 0">
+  {% for ts in local %}
+    <li>
+      ✅ {{ ts[0:4] }}-{{ ts[4:6] }}-{{ ts[6:8] }} {{ ts[8:10] }}:{{ ts[10:12] }}
+      · <a href="/sites/{{host}}/view?ts={{ts}}">view</a>
+      · <a href="/sites/{{host}}/tree?ts={{ts}}">browse</a>
+    </li>
+  {% endfor %}
+  </ul>
+  {% endif %}
+</section>
+
+<section>
+  <h3>Available snapshots on web.archive.org</h3>
+  <form method="get" style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:end">
+    <label>From year <input type="number" name="from_year" min="1996" max="2099" value="{{from_year}}" style="width:7rem"></label>
+    <label>To year <input type="number" name="to_year" min="1996" max="2099" value="{{to_year}}" style="width:7rem"></label>
+    <label><input type="checkbox" name="remote" value="1" {% if remote %}checked{% endif %}> include remote</label>
+    <button type="submit">Refresh</button>
+    <span style="margin-left:auto">{{ remote_snaps|length }} snapshots</span>
+  </form>
+
+  {% if remote_error %}
+    <p class="status-error">CDX error: {{ remote_error }}</p>
+  {% elif not remote_snaps %}
+    <p>No remote snapshots found.</p>
+  {% else %}
+    <details open>
+      <summary>Calendar by day ({{ days_sorted|length }} days)</summary>
+      <div style="max-height:400px;overflow:auto;border:1px solid var(--pico-muted-border-color);padding:.5rem;border-radius:.5rem">
+        {% for day in days_sorted %}
+          {% set first_ts = by_day[day][0].timestamp %}
+          <div style="display:flex;gap:.5rem;align-items:baseline;padding:.15rem 0">
+            <span class="mono" style="min-width:6.5rem">{{ day }}</span>
+            <span style="min-width:3rem;color:var(--pico-muted-color)">×{{ by_day[day]|length }}</span>
+            {% for s in by_day[day][:5] %}
+              <a href="#" class="pick-ts mono" data-ts="{{ s.timestamp }}">{{ s.timestamp[8:10] }}:{{ s.timestamp[10:12] }}</a>
+            {% endfor %}
+            {% if by_day[day]|length > 5 %}<small>+{{ by_day[day]|length - 5 }} more</small>{% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    </details>
+  {% endif %}
+</section>
+
+<script>
+// Wire up "pick date" + quick-link clicks to fill the timestamp input.
+const tsInput = document.getElementById('ts-input');
+const tsDate = document.getElementById('ts-date');
+const byDay = {
+  {% for day in days_sorted %}"{{ day }}": "{{ by_day[day][0].timestamp }}"{% if not loop.last %},{% endif %}
+  {% endfor %}
+};
+tsDate?.addEventListener('change', e => {
+  const d = e.target.value;
+  if (byDay[d]) { tsInput.value = byDay[d]; }
+  else if (d) { alert('No Wayback snapshot on ' + d + '. Nearest available:\n' +
+    (Object.keys(byDay).sort().find(k => k >= d) || Object.keys(byDay).sort().pop() || '—')); }
+});
+document.querySelectorAll('.pick-ts').forEach(a => a.addEventListener('click', e => {
+  e.preventDefault();
+  tsInput.value = e.target.dataset.ts;
+  tsInput.scrollIntoView({behavior:'smooth', block:'center'});
+}));
+</script>
+{% endblock %}

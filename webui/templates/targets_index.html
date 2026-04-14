@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Targets{% endblock %}
+{% block content %}
+<h2>Targets</h2>
+<form method="get" action="" onsubmit="location.href='/targets/'+encodeURIComponent(this.host.value.trim().replace(/^https?:\/\//,'').replace(/\/.*$/,''));return false">
+  <label>Look up any host:
+    <input type="text" name="host" required placeholder="example.com">
+  </label>
+  <button type="submit">Open</button>
+</form>
+
+<h3>Hosts with local archives</h3>
+{% if not hosts %}
+  <p>None yet.</p>
+{% else %}
+<table>
+  <thead><tr><th>Host</th><th>Snapshots</th><th>Newest</th><th></th></tr></thead>
+  <tbody>
+  {% for host, n, newest in hosts %}
+    <tr>
+      <td class="mono"><a href="/targets/{{host}}">{{ host }}</a></td>
+      <td>{{ n }}</td>
+      <td class="mono ts-cell">{{ newest[0:4] }}-{{ newest[4:6] }}-{{ newest[6:8] }}<br>{{ newest[8:10] }}:{{ newest[10:12] }}:{{ newest[12:14] }}</td>
+      <td><a href="/sites?host={{host}}">manage snapshots →</a></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}
