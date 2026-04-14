@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 import asyncio as _asyncio
 import json as _json
-from . import jobs, scheduler, log as log_mod, job_progress
+from . import jobs, scheduler, log as log_mod, job_progress, events_bus
 from .routes import dashboard, browser, schedules as schedules_routes, diff, sites as sites_routes, events as events_routes
 
 BASE = Path(__file__).parent
@@ -31,7 +31,9 @@ async def lifespan(app: FastAPI):
 
 
 async def _progress_logger(stop: _asyncio.Event) -> None:
-    """Every 30 s, log one line per running job: id, host, ts, counters, %."""
+    """Every 10 s, log one line per running job and publish a jobs-changed
+    SSE event so connected clients re-fetch the jobs tbody (keeps the
+    progress bars updating)."""
     lg = log_mod.get("progress")
     while not stop.is_set():
         try:
@@ -41,6 +43,7 @@ async def _progress_logger(stop: _asyncio.Event) -> None:
                     "FROM jobs WHERE status='running' ORDER BY id"
                 ).fetchall()
             if rows:
+                events_bus.publish("jobs-changed")
                 for r in rows:
                     try:
                         mf = _json.loads(r["flags_json"] or "{}").get("MAX_FILES")
@@ -61,7 +64,7 @@ async def _progress_logger(stop: _asyncio.Event) -> None:
         except Exception as e:
             lg.warning("progress tick failed: %s", e)
         try:
-            await _asyncio.wait_for(stop.wait(), timeout=30.0)
+            await _asyncio.wait_for(stop.wait(), timeout=10.0)
         except _asyncio.TimeoutError:
             pass
 
