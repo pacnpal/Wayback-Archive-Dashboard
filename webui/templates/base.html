@@ -5,8 +5,9 @@
 <title>{% block title %}Wayback Archive{% endblock %}</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
-<meta name="htmx-config" content='{"noSwap": [204, 304, "4xx", "5xx"], "defaultTimeout": 0}'>
+<meta name="htmx-config" content='{"noSwap": [204, 304, "4xx", "5xx"], "defaultTimeout": 0, "transitions": true, "extensions": "preload"}'>
 <script src="https://cdn.jsdelivr.net/npm/htmx.org@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/htmx.org@4/dist/ext/preload.min.js"></script>
 <style>
   body { max-width: 1200px; margin: 1rem auto; padding: 0 1rem; }
   nav ul { display: flex; gap: 1rem; list-style: none; padding: 0; }
@@ -37,6 +38,8 @@
   .per-page-wrap { display: inline-flex; align-items: center; gap: .3rem; font-size: .78rem; color: var(--pico-muted-color); text-transform: uppercase; letter-spacing: .05em; }
   .per-page-wrap select { margin: 0; padding: .15rem .4rem; width: auto; }
   .table-scroll { overflow-x: auto; margin: 0 -.25rem; padding: 0 .25rem; }
+  #toast { position: fixed; right: 1rem; bottom: 1rem; max-width: 22rem; padding: .6rem 1rem; background: #c62828; color: #fff; border-radius: .4rem; box-shadow: 0 4px 14px rgba(0,0,0,.3); font-size: .9rem; z-index: 9999; opacity: 0; transform: translateY(1rem); transition: opacity .15s, transform .15s; pointer-events: none; }
+  #toast.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
   .pager { display: flex; gap: .4rem; align-items: center; justify-content: center; margin-top: .5rem; flex-wrap: wrap; }
   @media (max-width: 600px) {
     body { margin: .5rem auto; padding: 0 .5rem; }
@@ -62,16 +65,16 @@
 <nav>
   <ul>
     <li><strong>🗄 Wayback Archive</strong></li>
-    <li><a href="/">Dashboard</a></li>
-    <li><a href="/sites">Sites</a></li>
-    <li><a href="/snapshots">Snapshots</a></li>
-    <li><a href="/schedules">Schedules</a></li>
+    <li><a href="/" preload>Dashboard</a></li>
+    <li><a href="/sites" preload>Sites</a></li>
+    <li><a href="/snapshots" preload>Snapshots</a></li>
+    <li><a href="/schedules" preload>Schedules</a></li>
   </ul>
 </nav>
 <main>{% block content %}{% endblock %}</main>
+<div id="toast" role="status" aria-live="polite"></div>
 <script>
-// Multi-select dropdown. Closes on outside click; updates trigger summary.
-(function() {
+(function setupComboboxes() {
   function setup(box) {
     if (box.dataset.wired) return;
     box.dataset.wired = "1";
@@ -89,7 +92,7 @@
       document.querySelectorAll('.multi-combo.open').forEach(o => { if (o !== box) o.classList.remove('open'); });
       box.classList.toggle('open');
     });
-    box.addEventListener('change', () => refresh());
+    box.addEventListener('change', refresh);
     refresh();
   }
   document.addEventListener('click', e => {
@@ -97,9 +100,27 @@
       if (!box.contains(e.target)) box.classList.remove('open');
     });
   });
-  const wire = () => document.querySelectorAll('.multi-combo').forEach(setup);
-  wire();
-  document.body.addEventListener('htmx:after:swap', wire);
+  htmx.onLoad(root => (root.querySelectorAll ? root : document)
+    .querySelectorAll('.multi-combo').forEach(setup));
+})();
+
+// Error toast: htmx 4 unifies request/swap/timeout errors under htmx:error.
+(function setupErrorToast() {
+  const toast = document.getElementById('toast');
+  let hideTimer = null;
+  function show(msg) {
+    toast.textContent = msg;
+    toast.classList.add('show');
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => toast.classList.remove('show'), 4000);
+  }
+  document.body.addEventListener('htmx:error', e => {
+    const ctx = e.detail?.ctx || {};
+    const status = ctx.response?.status;
+    const statusText = ctx.response?.statusText;
+    if (status === 0 || !status) show('Network error — server unreachable');
+    else show(`Error ${status}${statusText ? ': ' + statusText : ''}`);
+  });
 })();
 </script>
 </body>

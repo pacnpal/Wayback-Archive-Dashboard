@@ -191,7 +191,9 @@ async def jobs_bulk_action(request: Request):
         jobs.delete_many(ids)
     else:
         jobs.cancel_many(ids)
-    return RedirectResponse("/", status_code=303)
+    resp = RedirectResponse("/", status_code=303)
+    resp.headers["HX-Trigger"] = "jobs-changed"
+    return resp
 
 
 def _default_flags() -> dict:

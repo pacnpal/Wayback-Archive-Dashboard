@@ -60,21 +60,27 @@ async def create(target_url: str = Form(...), cron_expr: str = Form(...)):
                VALUES (?, ?, '{}', 1, ?, ?)""",
             (t, cron_expr.strip(), nxt, jobs.now_iso()),
         )
-    return RedirectResponse("/schedules", status_code=303)
+    resp = RedirectResponse("/schedules", status_code=303)
+    resp.headers["HX-Trigger"] = "jobs-changed"
+    return resp
 
 
 @router.post("/schedules/{sid}/toggle")
 async def toggle(sid: int):
     with jobs.connect() as c:
         c.execute("UPDATE schedules SET enabled = 1 - enabled WHERE id=?", (sid,))
-    return RedirectResponse("/schedules", status_code=303)
+    resp = RedirectResponse("/schedules", status_code=303)
+    resp.headers["HX-Trigger"] = "jobs-changed"
+    return resp
 
 
 @router.post("/schedules/{sid}/delete")
 async def delete(sid: int):
     with jobs.connect() as c:
         c.execute("DELETE FROM schedules WHERE id=?", (sid,))
-    return RedirectResponse("/schedules", status_code=303)
+    resp = RedirectResponse("/schedules", status_code=303)
+    resp.headers["HX-Trigger"] = "jobs-changed"
+    return resp
 
 
 @router.post("/schedules/{sid}/run-now")
@@ -87,4 +93,6 @@ async def run_now(sid: int):
     with jobs.connect() as c:
         c.execute("UPDATE schedules SET last_run_at=?, last_job_id=? WHERE id=?",
                   (jobs.now_iso(), jid, sid))
-    return RedirectResponse("/schedules", status_code=303)
+    resp = RedirectResponse("/schedules", status_code=303)
+    resp.headers["HX-Trigger"] = "jobs-changed"
+    return resp

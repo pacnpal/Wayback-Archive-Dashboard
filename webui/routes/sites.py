@@ -178,7 +178,9 @@ async def rewrite_links(host: str, ts: str = ""):
     a single snapshot if `ts` is given, otherwise every snapshot of the host."""
     host_dir = jobs.OUTPUT_ROOT / host
     if not host_dir.is_dir():
-        return RedirectResponse(f"/sites/{host}", status_code=303)
+        resp = RedirectResponse(f"/sites/{host}", status_code=303)
+    resp.headers["HX-Trigger"] = "jobs-changed"
+    return resp
     targets = [host_dir / ts] if ts else [p for p in host_dir.iterdir() if p.is_dir()]
     totals = {"snapshots": 0, "files_scanned": 0, "files_changed": 0, "refs_rewritten": 0}
     for snap in targets:
@@ -202,14 +204,18 @@ async def rewrite_links(host: str, ts: str = ""):
 async def audit_snapshots(host: str, ts: str = ""):
     host_dir = jobs.OUTPUT_ROOT / host
     if not host_dir.is_dir():
-        return RedirectResponse(f"/sites/{host}", status_code=303)
+        resp = RedirectResponse(f"/sites/{host}", status_code=303)
+    resp.headers["HX-Trigger"] = "jobs-changed"
+    return resp
     targets = [ts] if ts else [
         p.name for p in host_dir.iterdir()
         if p.is_dir() and sites_index.is_snapshot_ts(p.name)
     ]
     for t in targets:
         asset_audit.get_audit(host_dir / t, force=True)
-    return RedirectResponse(f"/sites/{host}", status_code=303)
+    resp = RedirectResponse(f"/sites/{host}", status_code=303)
+    resp.headers["HX-Trigger"] = "jobs-changed"
+    return resp
 
 
 @router.get("/sites/{host}/audit/{ts}", response_class=HTMLResponse)
@@ -230,7 +236,9 @@ async def repair_snapshot(host: str, ts: str = Form(...)):
     rel_paths = [m["rel"] for m in data["missing"]]
     if rel_paths:
         jobs.enqueue_repair(host, ts, rel_paths)
-    return RedirectResponse(f"/sites/{host}", status_code=303)
+    resp = RedirectResponse(f"/sites/{host}", status_code=303)
+    resp.headers["HX-Trigger"] = "jobs-changed"
+    return resp
 
 
 @router.post("/sites/{host}/archive")
@@ -239,4 +247,6 @@ async def archive_one(host: str, request: Request):
     ts = (form.get("timestamp") or "").strip() or None
     from .dashboard import _default_flags
     jobs.enqueue(f"https://{host}", ts, _default_flags())
-    return RedirectResponse(f"/sites/{host}", status_code=303)
+    resp = RedirectResponse(f"/sites/{host}", status_code=303)
+    resp.headers["HX-Trigger"] = "jobs-changed"
+    return resp

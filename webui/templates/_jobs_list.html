@@ -76,11 +76,11 @@
   </tr></thead>
   <tbody id="jobs-tbody"
          hx-get="{{ refresh_url }}"
-         hx-trigger="every 5s"
+         hx-trigger="every 5s, jobs-changed from:body"
          hx-select="#jobs-tbody"
-         hx-swap="outerHTML">
+         hx-swap="outerMorph">
   {% for j in jobs %}
-    <tr>
+    <tr id="job-{{ j.id }}">
       <td><input type="checkbox" name="job_id" value="{{j.id}}"></td>
       <td class="type-cell" title="{% if j.repair_paths_json %}Repair (targeted asset refetch){% else %}Archive (full crawl){% endif %}">
         <span class="type-badge {% if j.repair_paths_json %}repair{% else %}archive{% endif %}"
