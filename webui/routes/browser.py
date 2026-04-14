@@ -122,8 +122,15 @@ async def tree(request: Request, host: str, ts: str, path: str = ""):
 
 @router.get("/sites/{host}/view")
 async def view(host: str, ts: str, path: str = "index.html"):
+    # Legacy query-string viewer; redirect into the path-based one so
+    # rewritten relative refs resolve correctly.
+    return RedirectResponse(f"/sites/{host}/view/{ts}/{path}", status_code=302)
+
+
+@router.get("/sites/{host}/view/{ts}/{path:path}")
+async def view_path(host: str, ts: str, path: str = ""):
     base = _host_dir(host) / ts
-    f = _safe_path(base, path)
+    f = _safe_path(base, path or "index.html")
     if f.is_dir():
         f = f / "index.html"
     if not f.exists():
