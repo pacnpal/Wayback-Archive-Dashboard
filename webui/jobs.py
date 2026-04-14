@@ -158,10 +158,24 @@ def enqueue(target_url: str, timestamp: Optional[str], flags: dict, schedule_id:
 
 def enqueue_repair(host: str, timestamp: str, rel_paths: list[str], flags: Optional[dict] = None) -> int:
     """Queue a repair job that re-fetches specific missing rel paths for an
-    existing snapshot (host/timestamp)."""
+    existing snapshot (host/timestamp). If an identical repair job is already
+    pending or running for the same (host, ts), returns that job's id instead
+    of queueing a duplicate."""
     import json as _json
     if not rel_paths:
         raise ValueError("no rel_paths")
+    with connect() as c:
+        dup = c.execute(
+            "SELECT id FROM jobs "
+            "WHERE host=? AND timestamp=? AND repair_paths_json IS NOT NULL "
+            "AND status IN ('pending','running') "
+            "ORDER BY id DESC LIMIT 1",
+            (host, timestamp),
+        ).fetchone()
+    if dup:
+        logger.info("enqueue repair dedup host=%s ts=%s existing_job=%d",
+                    host, timestamp, dup["id"])
+        return dup["id"]
     site_dir = str(OUTPUT_ROOT / host / timestamp)
     log_path = str(Path(site_dir) / ".log")
     wb = f"https://web.archive.org/web/{timestamp}/https://{host}/"
