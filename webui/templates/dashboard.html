@@ -90,5 +90,32 @@
 </details>
 
 <h2>Jobs</h2>
-<div class="jobs-wrap" hx-get="/jobs/list" hx-trigger="load, every 5s" hx-swap="innerHTML">Loading…</div>
+<div class="jobs-wrap" hx-get="/jobs/list" hx-trigger="load, every 5s"
+     hx-swap="innerHTML" hx-sync="this:replace">Loading…</div>
+<script>
+(function() {
+  const wrap = document.querySelector('.jobs-wrap');
+  let saved = null;
+  wrap.addEventListener('htmx:configRequest', e => {
+    // If any row is selected, skip the auto-refresh entirely (manual reloads via
+    // filter/page links pass their own target and should still go through).
+    if (e.detail.triggeringEvent && e.detail.triggeringEvent.type === 'htmx:trigger'
+        && wrap.querySelector('input[name=job_id]:checked')) {
+      e.preventDefault();
+    }
+  });
+  wrap.addEventListener('htmx:beforeSwap', () => {
+    saved = new Set(
+      [...wrap.querySelectorAll('input[name=job_id]:checked')].map(c => c.value)
+    );
+  });
+  wrap.addEventListener('htmx:afterSwap', () => {
+    if (!saved) return;
+    wrap.querySelectorAll('input[name=job_id]').forEach(c => {
+      if (saved.has(c.value)) c.checked = true;
+    });
+    saved = null;
+  });
+})();
+</script>
 {% endblock %}
