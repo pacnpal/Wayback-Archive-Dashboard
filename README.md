@@ -38,18 +38,74 @@ favicon, SSE-driven live updates, and a resume-aware job queue.
 
 ## Quick start
 
+Prebuilt multi-arch images are published on every release and every
+push to `master`:
+
+- Docker Hub: `pacnpal/wayback-archive-dashboard:latest` (or
+  `:X.Y.Z` for a pinned release)
+- GHCR: `ghcr.io/pacnpal/wayback-archive-dashboard:latest`
+
+### docker run
+
+```bash
+docker run -d --name wayback-archive \
+  -p 8765:8765 \
+  -v /mnt/user/appdata/wayback-archive:/app/output \
+  --restart unless-stopped \
+  pacnpal/wayback-archive-dashboard:latest
+# open http://<host>:8765
+```
+
+### docker compose
+
+```yaml
+services:
+  wayback-archive:
+    image: pacnpal/wayback-archive-dashboard:latest
+    container_name: wayback-archive
+    ports:
+      - "8765:8765"
+    environment:
+      OUTPUT_DIR: /app/output
+      # LOG_LEVEL: INFO        # DEBUG | INFO | WARNING | ERROR
+      # MAX_CONCURRENT: 3
+    volumes:
+      - /mnt/user/appdata/wayback-archive:/app/output
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8765/health', timeout=3).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+```
+
+Pin to a specific release by swapping `:latest` for `:1.2.3` (or
+whatever tag the GitHub release produced).
+
+### Build from source
+
 ```bash
 git clone https://github.com/pacnpal/Wayback-Archive-Dashboard.git
 cd Wayback-Archive-Dashboard
 docker compose up -d --build
-# open http://<host>:8765
 ```
 
 Archives land in `/mnt/user/appdata/wayback-archive/` on the host
-(change the bind mount in `docker-compose.yml` if you prefer a
-different path). The dashboard remembers its SQLite state in
-`<OUTPUT_DIR>/.dashboard.db` so job history and schedules survive
-container rebuilds.
+(change the bind mount if you prefer a different path). The dashboard
+remembers its SQLite state in `<OUTPUT_DIR>/.dashboard.db` so job
+history and schedules survive container rebuilds.
+
+## Releases
+
+Tagged releases (`vX.Y.Z` via GitHub Releases) automatically build and
+publish multi-arch images (linux/amd64, linux/arm64) to both Docker
+Hub and GHCR with the following tags:
+
+- `X.Y.Z`    — the exact release version
+- `X.Y`      — rolling tag for the minor line
+- `latest`   — always points at the most recent build on the default branch
+- `sha-abc1234` — immutable commit pin
 
 ## Configuration
 
