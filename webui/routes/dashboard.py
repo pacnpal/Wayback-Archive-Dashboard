@@ -91,6 +91,14 @@ async def cancel_all():
     return RedirectResponse(f"/?cancelled={n}", status_code=303)
 
 
+@router.post("/jobs/cancel-selected")
+async def cancel_selected(request: Request):
+    form = await request.form()
+    ids = [int(v) for v in form.getlist("job_id") if str(v).isdigit()]
+    jobs.cancel_many(ids)
+    return RedirectResponse("/", status_code=303)
+
+
 def _default_flags() -> dict:
     out = {key: ("true" if default else "false") for key, default in FLAG_DEFAULTS}
     return out

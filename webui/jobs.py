@@ -120,6 +120,28 @@ def count_jobs(status: Optional[str] = None) -> int:
         return c.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
 
 
+def cancel_many(ids: list[int]) -> int:
+    if not ids:
+        return 0
+    cancelled = 0
+    for jid in ids:
+        proc = _running.get(jid)
+        if proc and proc.returncode is None:
+            try:
+                proc.send_signal(signal.SIGTERM)
+                cancelled += 1
+            except ProcessLookupError:
+                pass
+    qmarks = ",".join("?" * len(ids))
+    with connect() as c:
+        r = c.execute(
+            f"UPDATE jobs SET status='error', finished_at=? "
+            f"WHERE status='pending' AND id IN ({qmarks})",
+            [now_iso(), *ids],
+        ).rowcount
+    return cancelled + r
+
+
 def cancel_all_pending() -> int:
     with connect() as c:
         return c.execute(

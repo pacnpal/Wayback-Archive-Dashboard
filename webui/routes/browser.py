@@ -2,6 +2,7 @@
 from __future__ import annotations
 from pathlib import Path
 
+import shutil
 from fastapi import APIRouter, HTTPException, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from fastapi.templating import Jinja2Templates
@@ -41,6 +42,41 @@ async def sites(request: Request):
             if snaps:
                 hosts.append((h.name, snaps))
     return templates.TemplateResponse("sites.html", {"request": request, "hosts": hosts})
+
+
+def _delete_snapshot(host: str, ts: str) -> bool:
+    base = jobs.OUTPUT_ROOT.resolve()
+    target = (jobs.OUTPUT_ROOT / host / ts).resolve()
+    if base not in target.parents or not target.is_dir():
+        return False
+    shutil.rmtree(target)
+    parent = target.parent
+    if parent.is_dir() and not any(parent.iterdir()):
+        parent.rmdir()
+    return True
+
+
+@router.post("/sites/delete")
+async def sites_delete(request: Request):
+    form = await request.form()
+    # Values are "host/ts" strings from checkboxes
+    count = 0
+    for entry in form.getlist("snapshot"):
+        if "/" not in entry:
+            continue
+        host, ts = entry.split("/", 1)
+        if _delete_snapshot(host, ts):
+            count += 1
+    return RedirectResponse("/sites", status_code=303)
+
+
+@router.post("/sites/{host}/delete-all")
+async def delete_host(host: str):
+    base = jobs.OUTPUT_ROOT.resolve()
+    target = (jobs.OUTPUT_ROOT / host).resolve()
+    if base in target.parents and target.is_dir():
+        shutil.rmtree(target)
+    return RedirectResponse("/sites", status_code=303)
 
 
 @router.get("/sites/{host}/tree", response_class=HTMLResponse)
