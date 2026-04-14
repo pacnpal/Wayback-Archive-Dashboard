@@ -277,6 +277,15 @@ def delete_many(ids: list[int]) -> int:
         return c.execute(f"DELETE FROM jobs WHERE id IN ({qmarks})", ids).rowcount
 
 
+def delete_jobs_for_host(host: str) -> int:
+    with connect() as c:
+        n = c.execute("DELETE FROM jobs WHERE host=?", (host,)).rowcount
+    if n:
+        logger.info("delete jobs host=%s count=%d", host, n)
+        events_bus.publish("jobs-changed")
+    return n
+
+
 def cancel_many(ids: list[int]) -> int:
     if not ids:
         return 0

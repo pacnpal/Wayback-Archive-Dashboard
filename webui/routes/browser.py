@@ -155,13 +155,40 @@ async def sites_bulk_action(request: Request):
     return RedirectResponse("/snapshots", status_code=303)
 
 
-@router.post("/sites/{host}/delete-all")
-async def delete_host(host: str):
+def _delete_host(host: str) -> dict:
+    """Wipe a host from disk and drop its job rows. Safe against path escape."""
     base = jobs.OUTPUT_ROOT.resolve()
     target = (jobs.OUTPUT_ROOT / host).resolve()
+    removed_snapshots = 0
     if base in target.parents and target.is_dir():
+        removed_snapshots = sum(1 for p in target.iterdir() if p.is_dir())
         shutil.rmtree(target)
-    return RedirectResponse("/snapshots", status_code=303)
+    jobs_removed = jobs.delete_jobs_for_host(host)
+    from .. import log as _log
+    _log.get("sites").info(
+        "delete host=%s snapshots=%d jobs=%d", host, removed_snapshots, jobs_removed,
+    )
+    return {"snapshots_removed": removed_snapshots, "jobs_removed": jobs_removed}
+
+
+@router.post("/sites/{host}/delete-all")
+async def delete_host(host: str):
+    _delete_host(host)
+    resp = RedirectResponse("/sites", status_code=303)
+    resp.headers["HX-Trigger"] = "jobs-changed, sites-changed"
+    return resp
+
+
+@router.post("/sites/bulk-delete")
+async def sites_bulk_delete(request: Request):
+    form = await request.form()
+    for h in form.getlist("host"):
+        h = (h or "").strip()
+        if h:
+            _delete_host(h)
+    resp = RedirectResponse("/sites", status_code=303)
+    resp.headers["HX-Trigger"] = "jobs-changed, sites-changed"
+    return resp
 
 
 @router.get("/sites/{host}/tree", response_class=HTMLResponse)

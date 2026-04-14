@@ -19,41 +19,68 @@
 {% if total > sizes[-1] %}{% set _ = sizes.append(100000) %}{% endif %}
 {% set qs_keep = "sort=" ~ sort ~ "&dir=" ~ dir %}
 
+<form method="post" action="/sites/bulk-delete" id="sites-form"
+      onsubmit="return sitesConfirmDelete(this, event)">
 <div class="list-toolbar">
-  <form method="get" style="display:inline-flex;align-items:end;gap:.3rem">
-    <input type="hidden" name="sort" value="{{sort}}">
-    <input type="hidden" name="dir"  value="{{dir}}">
-    <label class="per-page-wrap">Per page
-      <select name="per_page" onchange="this.form.submit()">
-        {% for n in sizes %}
-          <option value="{{n}}" {% if n == per_page %}selected{% endif %}>{% if n >= 100000 %}All{% else %}{{n}}{% endif %}</option>
-        {% endfor %}
-      </select>
-    </label>
-  </form>
+  <button type="submit" class="secondary">Delete selected (<span id="sites-sel-count">0</span>)</button>
+  <label class="per-page-wrap">Per page
+    <select name="per_page"
+            onchange="location.href='?sort={{sort}}&dir={{dir}}&per_page='+this.value">
+      {% for n in sizes %}
+        <option value="{{n}}" {% if n == per_page %}selected{% endif %}>{% if n >= 100000 %}All{% else %}{{n}}{% endif %}</option>
+      {% endfor %}
+    </select>
+  </label>
   <span style="margin-left:auto;font-size:.85rem;color:var(--pico-muted-color)">{{ total }} host{{ 's' if total!=1 else '' }}</span>
 </div>
 
 <div class="table-scroll">
 <table>
   <thead><tr>
+    <th><input type="checkbox" onclick="this.closest('form').querySelectorAll('input[name=host]').forEach(c=>c.checked=this.checked)"></th>
     <th>{{ lh.sort_link('host', 'Host', sort, dir) }}</th>
     <th>{{ lh.sort_link('count', 'Snapshots', sort, dir) }}</th>
     <th>{{ lh.sort_link('newest', 'Newest', sort, dir) }}</th>
-    <th></th>
+    <th>Actions</th>
   </tr></thead>
   <tbody>
   {% for host, n, newest in hosts %}
     <tr>
+      <td><input type="checkbox" name="host" value="{{host}}"></td>
       <td class="mono"><a href="/sites/{{host}}">{{ host }}</a></td>
       <td>{{ n }}</td>
       <td class="mono ts-cell">{{ newest[0:4] }}-{{ newest[4:6] }}-{{ newest[6:8] }}<br>{{ newest[8:10] }}:{{ newest[10:12] }}:{{ newest[12:14] }}</td>
-      <td><a href="/snapshots?hosts={{host}}">snapshots →</a></td>
+      <td>
+        <a href="/snapshots?hosts={{host}}">snapshots →</a>
+        &middot;
+        <form method="post" action="/sites/{{host}}/delete-all" style="display:inline"
+              onsubmit="return confirm('DELETE all {{n}} snapshot(s) of {{host}} from disk?');">
+          <button type="submit" class="secondary" style="padding:.1rem .4rem;font-size:.8rem">delete</button>
+        </form>
+      </td>
     </tr>
   {% endfor %}
   </tbody>
 </table>
 </div>
+</form>
+<script>
+(function(){
+  const f = document.getElementById('sites-form');
+  if (!f) return;
+  const refresh = () => {
+    const n = f.querySelectorAll('input[name=host]:checked').length;
+    document.getElementById('sites-sel-count').textContent = n;
+  };
+  f.addEventListener('change', e => { if (e.target.matches('input[type=checkbox]')) refresh(); });
+  refresh();
+})();
+function sitesConfirmDelete(form, ev) {
+  const n = form.querySelectorAll('input[name=host]:checked').length;
+  if (!n) { ev.preventDefault(); alert('No sites selected.'); return false; }
+  return confirm(`DELETE ${n} site${n===1?'':'s'} and all their snapshots from disk?`);
+}
+</script>
 
 <nav class="pager">
   <a href="?{{qs_keep}}&page=1&per_page={{per_page}}" {% if page<=1 %}aria-disabled="true"{% endif %}>« first</a>
