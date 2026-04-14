@@ -110,11 +110,18 @@
     );
   });
   wrap.addEventListener('htmx:afterSwap', () => {
-    if (!saved) return;
-    wrap.querySelectorAll('input[name=job_id]').forEach(c => {
-      if (saved.has(c.value)) c.checked = true;
-    });
-    saved = null;
+    // Sync the auto-refresh URL to whatever the user just loaded.
+    const marker = wrap.querySelector('#jobs-current-url');
+    if (marker) {
+      wrap.setAttribute('hx-get', marker.dataset.url);
+      htmx.process(wrap);
+    }
+    if (saved) {
+      wrap.querySelectorAll('input[name=job_id]').forEach(c => {
+        if (saved.has(c.value)) c.checked = true;
+      });
+      saved = null;
+    }
   });
 })();
 </script>
