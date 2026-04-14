@@ -16,20 +16,21 @@ def host_of(url: str) -> str:
     return h.lower().lstrip(".")
 
 
-def latest_timestamp(target_url: str) -> Optional[str]:
-    try:
-        snaps = list_snapshots(target_url, limit=1)
-    except Exception:
-        return None
-    # CDX returns oldest-first; ask for last by re-querying without limit is expensive.
-    # Instead query with high limit and pick max; but our cache makes this cheap.
+def latest_snapshot(target_url: str) -> Optional[tuple[str, str]]:
+    """Return (timestamp, archived_original_url) for newest snapshot, or None."""
     try:
         snaps = list_snapshots(target_url, limit=10000)
     except Exception:
         return None
     if not snaps:
         return None
-    return max(s["timestamp"] for s in snaps)
+    best = max(snaps, key=lambda s: s["timestamp"])
+    return best["timestamp"], best["original"]
+
+
+def latest_timestamp(target_url: str) -> Optional[str]:
+    r = latest_snapshot(target_url)
+    return r[0] if r else None
 
 
 def build_wayback_url(target_url: str, timestamp: Optional[str] = None) -> str:

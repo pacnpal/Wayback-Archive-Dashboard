@@ -51,7 +51,7 @@ async def create_job(request: Request):
     if not target:
         raise HTTPException(400, "target_url required")
     if "://" not in target:
-        target = "http://" + target
+        target = "https://" + target
     ts = (form.get("timestamp") or "").strip() or None
     flags = _collect_flags(form)
     jobs.enqueue(target, ts, flags)
