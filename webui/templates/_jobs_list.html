@@ -11,6 +11,7 @@
     · <a href="#" hx-get="/jobs/list?status=running&per_page={{per_page}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML">running</a>
     · <a href="#" hx-get="/jobs/list?status=ok&per_page={{per_page}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML">ok</a>
     · <a href="#" hx-get="/jobs/list?status=error&per_page={{per_page}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML">error</a>
+    · <a href="#" hx-get="/jobs/list?status=cancelled&per_page={{per_page}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML">cancelled</a>
   </span>
   <span style="margin-left:auto">{{ total }} total{% if status %} ({{status}}){% endif %}</span>
 </div>

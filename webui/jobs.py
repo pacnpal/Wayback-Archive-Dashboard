@@ -25,6 +25,7 @@ UPSTREAM_FLAGS = [
 ]
 
 _running: dict[int, asyncio.subprocess.Process] = {}
+_cancelled: set[int] = set()
 
 
 def now_iso() -> str:
@@ -125,6 +126,7 @@ def cancel_many(ids: list[int]) -> int:
         return 0
     cancelled = 0
     for jid in ids:
+        _cancelled.add(jid)
         proc = _running.get(jid)
         if proc and proc.returncode is None:
             try:
@@ -135,7 +137,7 @@ def cancel_many(ids: list[int]) -> int:
     qmarks = ",".join("?" * len(ids))
     with connect() as c:
         r = c.execute(
-            f"UPDATE jobs SET status='error', finished_at=? "
+            f"UPDATE jobs SET status='cancelled', finished_at=? "
             f"WHERE status='pending' AND id IN ({qmarks})",
             [now_iso(), *ids],
         ).rowcount
@@ -144,8 +146,11 @@ def cancel_many(ids: list[int]) -> int:
 
 def cancel_all_pending() -> int:
     with connect() as c:
+        ids = [r[0] for r in c.execute("SELECT id FROM jobs WHERE status='pending'").fetchall()]
+        for jid in ids:
+            _cancelled.add(jid)
         return c.execute(
-            "UPDATE jobs SET status='error', finished_at=? WHERE status='pending'",
+            "UPDATE jobs SET status='cancelled', finished_at=? WHERE status='pending'",
             (now_iso(),),
         ).rowcount
 
@@ -156,6 +161,7 @@ def get_job(job_id: int) -> Optional[sqlite3.Row]:
 
 
 def cancel_job(job_id: int) -> bool:
+    _cancelled.add(job_id)
     proc = _running.get(job_id)
     if proc and proc.returncode is None:
         try:
@@ -165,7 +171,7 @@ def cancel_job(job_id: int) -> bool:
         return True
     with connect() as c:
         c.execute(
-            "UPDATE jobs SET status='error', finished_at=? WHERE id=? AND status='pending'",
+            "UPDATE jobs SET status='cancelled', finished_at=? WHERE id=? AND status='pending'",
             (now_iso(), job_id),
         )
     return False
@@ -195,7 +201,11 @@ async def _run_one(job: sqlite3.Row) -> None:
     finally:
         log_f.close()
         _running.pop(job["id"], None)
-    status = "ok" if rc == 0 else "error"
+    if job["id"] in _cancelled:
+        status = "cancelled"
+        _cancelled.discard(job["id"])
+    else:
+        status = "ok" if rc == 0 else "error"
     with connect() as c:
         c.execute(
             "UPDATE jobs SET status=?, finished_at=? WHERE id=?",
