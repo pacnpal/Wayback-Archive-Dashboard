@@ -21,7 +21,11 @@ def _local_hosts() -> list[tuple[str, int, str]]:
         return []
     out = []
     for h in sorted(p for p in root.iterdir() if p.is_dir() and not p.name.startswith(".")):
-        snaps = sorted([s.name for s in h.iterdir() if s.is_dir()], reverse=True)
+        snaps = sorted(
+            (s.name for s in h.iterdir()
+             if s.is_dir() and sites_index.is_snapshot_ts(s.name)),
+            reverse=True,
+        )
         if snaps:
             out.append((h.name, len(snaps), snaps[0]))
     return out

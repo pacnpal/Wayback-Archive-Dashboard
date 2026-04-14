@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json
 import os
+import re
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,6 +11,14 @@ from typing import Optional
 from . import jobs
 
 INDEX_NAME = ".index.json"
+
+_TS_RE = re.compile(r"^\d{14}$")
+
+
+def is_snapshot_ts(name: str) -> bool:
+    """Snapshot dir names are always `YYYYMMDDHHMMSS` (14 digits).
+    Anything else under `<host>/` is archived site content, not a snapshot."""
+    return bool(_TS_RE.match(name))
 
 
 def _index_path(host: str) -> Path:
@@ -77,7 +86,7 @@ def refresh_index(host: str, timestamps: Optional[list[str]] = None) -> dict:
     idx = _load(host)
     snaps = timestamps
     if snaps is None:
-        snaps = [p.name for p in host_dir.iterdir() if p.is_dir()]
+        snaps = [p.name for p in host_dir.iterdir() if p.is_dir() and is_snapshot_ts(p.name)]
     changed = False
     for ts in snaps:
         sd = host_dir / ts
@@ -101,7 +110,7 @@ def get_index(host: str) -> dict:
     if not host_dir.is_dir():
         return {}
     idx = _load(host)
-    on_disk = {p.name for p in host_dir.iterdir() if p.is_dir()}
+    on_disk = {p.name for p in host_dir.iterdir() if p.is_dir() and is_snapshot_ts(p.name)}
     stale: list[str] = []
     # Drop index entries whose dir was removed.
     for ts in list(idx.keys()):

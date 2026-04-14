@@ -45,6 +45,8 @@ def _all_snapshots() -> list[dict]:
     for h in (p for p in root.iterdir() if p.is_dir() and not p.name.startswith(".")):
         idx = sites_index.get_index(h.name)
         for ts, meta in idx.items():
+            if not sites_index.is_snapshot_ts(ts):
+                continue
             out.append({"host": h.name, "ts": ts,
                         "size_bytes": meta.get("size_bytes", 0),
                         "file_count": meta.get("file_count", 0)})
