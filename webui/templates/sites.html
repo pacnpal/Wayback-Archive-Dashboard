@@ -13,14 +13,10 @@
 
 <form method="post" action="/sites/bulk-action"
       onsubmit="return sitesAct(this, event);">
-<input type="hidden" name="scope" value="selected" id="sites-scope">
-<input type="hidden" name="page" value="{{page}}">
-<input type="hidden" name="per_page" value="{{per_page}}">
-<input type="hidden" name="host" value="{{host}}">
+<input type="hidden" name="scope" value="selected">
 
 <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.5rem">
-  <button type="submit" class="secondary" onclick="document.getElementById('sites-scope').value='selected'">Delete selected</button>
-  <button type="submit" class="secondary" onclick="document.getElementById('sites-scope').value='shown'">Delete all shown</button>
+  <button type="submit" class="secondary">Delete selected</button>
   <label>Host:
     <select onchange="location.href='/sites?per_page={{per_page}}'+(this.value?('&host='+encodeURIComponent(this.value)):'')">
       <option value="">all ({{ hosts_all|length }})</option>
@@ -65,15 +61,8 @@
 
 <script>
 function sitesAct(form, ev) {
-  const scope = form.querySelector('#sites-scope').value;
-  let n;
-  if (scope === 'selected') {
-    n = form.querySelectorAll('input[name=snapshot]:checked').length;
-    if (!n) { ev.preventDefault(); alert('No snapshots selected.'); return false; }
-  } else {
-    n = form.querySelectorAll('input[name=snapshot]').length;
-    if (!n) { ev.preventDefault(); alert('Nothing shown.'); return false; }
-  }
+  const n = form.querySelectorAll('input[name=snapshot]:checked').length;
+  if (!n) { ev.preventDefault(); alert('No snapshots selected.'); return false; }
   return confirm(`DELETE ${n} snapshot${n===1?'':'s'} from disk?`);
 }
 </script>

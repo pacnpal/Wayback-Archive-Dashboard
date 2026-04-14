@@ -5,18 +5,11 @@
 
 <form method="post" action="/jobs/bulk-action" id="jobs-form" hx-post="/jobs/bulk-action" hx-swap="none">
 <input type="hidden" name="action" id="jobs-action" value="cancel">
-<input type="hidden" name="scope" id="jobs-scope" value="selected">
-<input type="hidden" name="page" value="{{page}}">
-<input type="hidden" name="per_page" value="{{per_page}}">
-<input type="hidden" name="status" value="{{status}}">
+<input type="hidden" name="scope" value="selected">
 
 <div class="jobs-toolbar" style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.5rem">
-  <button type="button" class="secondary" onclick="jobsAct('cancel','selected',this)">Cancel selected</button>
-  <button type="button" class="secondary" onclick="jobsAct('delete','selected',this)">Delete selected</button>
-  <span style="border-left:1px solid #888;padding-left:.5rem">
-    <button type="button" class="secondary" onclick="jobsAct('cancel','shown',this)">Cancel all shown</button>
-    <button type="button" class="secondary" onclick="jobsAct('delete','shown',this)">Delete all shown</button>
-  </span>
+  <button type="button" class="secondary" onclick="jobsAct('cancel',this)">Cancel selected</button>
+  <button type="button" class="secondary" onclick="jobsAct('delete',this)">Delete selected</button>
   <span>
     Filter:
     <a href="#" hx-get="/jobs/list?per_page={{per_page}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML">all</a>
@@ -74,20 +67,13 @@
 </form>
 
 <script>
-function jobsAct(action, scope, btn) {
+function jobsAct(action, btn) {
   const f = btn.closest('form');
   const word = action === 'delete' ? 'DELETE' : 'CANCEL';
-  let n;
-  if (scope === 'selected') {
-    n = f.querySelectorAll('input[name=job_id]:checked').length;
-    if (!n) { alert('No jobs selected.'); return; }
-  } else {
-    n = f.querySelectorAll('input[name=job_id]').length;
-    if (!n) { alert('No jobs shown.'); return; }
-  }
+  const n = f.querySelectorAll('input[name=job_id]:checked').length;
+  if (!n) { alert('No jobs selected.'); return; }
   if (!confirm(`${word} ${n} job${n===1?'':'s'}${action==='delete'?' (including archived files on disk)':''}?`)) return;
   f.querySelector('#jobs-action').value = action;
-  f.querySelector('#jobs-scope').value = scope;
   htmx.trigger(f, 'submit');
 }
 </script>

@@ -76,23 +76,7 @@ def _delete_snapshot(host: str, ts: str) -> bool:
 @router.post("/sites/bulk-action")
 async def sites_bulk_action(request: Request):
     form = await request.form()
-    scope = form.get("scope", "selected")
-    if scope == "shown":
-        host = form.get("host") or ""
-        try:
-            page = int(form.get("page") or 1)
-            per_page = int(form.get("per_page") or 50)
-        except ValueError:
-            page, per_page = 1, 50
-        per_page = max(1, min(per_page, 100000))
-        items = _all_snapshots()
-        if host:
-            items = [i for i in items if i[0] == host]
-        slice_ = items[(page - 1) * per_page:(page - 1) * per_page + per_page]
-        entries = [f"{h}/{t}" for h, t in slice_]
-    else:
-        entries = form.getlist("snapshot")
-    for entry in entries:
+    for entry in form.getlist("snapshot"):
         if "/" not in entry:
             continue
         h, t = entry.split("/", 1)

@@ -89,19 +89,7 @@ async def jobs_list(request: Request, page: int = 1, per_page: int = 25, status:
 async def jobs_bulk_action(request: Request):
     form = await request.form()
     action = form.get("action", "")
-    scope = form.get("scope", "selected")  # "selected" or "shown"
-    if scope == "shown":
-        status = form.get("status") or None
-        try:
-            per_page = int(form.get("per_page") or 50)
-            page = int(form.get("page") or 1)
-        except ValueError:
-            per_page, page = 50, 1
-        per_page = max(1, min(per_page, 100000))
-        rows = jobs.list_jobs(limit=per_page, offset=(page - 1) * per_page, status=status)
-        ids = [r["id"] for r in rows]
-    else:
-        ids = [int(v) for v in form.getlist("job_id") if str(v).isdigit()]
+    ids = [int(v) for v in form.getlist("job_id") if str(v).isdigit()]
     if action == "delete":
         jobs.delete_many(ids)
     else:
