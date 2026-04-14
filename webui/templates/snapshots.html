@@ -11,14 +11,14 @@
 {% if total > sizes[-1] %}{% set _ = sizes.append(100000) %}{% endif %}
 {% set qs_host = ("&host=" ~ host) if host else "" %}
 
-<form method="post" action="/sites/bulk-action"
+<form method="post" action="/snapshots/bulk-action"
       onsubmit="return sitesAct(this, event);">
 <input type="hidden" name="scope" value="selected">
 
 <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.5rem">
   <button type="submit" class="secondary">Delete selected (<span id="sites-sel-count">0</span>)</button>
   <label>Host:
-    <select onchange="location.href='/sites?per_page={{per_page}}'+(this.value?('&host='+encodeURIComponent(this.value)):'')">
+    <select onchange="location.href='/snapshots?per_page={{per_page}}'+(this.value?('&host='+encodeURIComponent(this.value)):'')">
       <option value="">all ({{ hosts_all|length }})</option>
       {% for h in hosts_all %}<option value="{{h}}" {% if h==host %}selected{% endif %}>{{h}}</option>{% endfor %}
     </select>
@@ -47,21 +47,21 @@
 </table>
 
 <nav class="pager" style="display:flex;gap:.4rem;align-items:center;justify-content:center;margin-top:.5rem;flex-wrap:wrap">
-  <a href="/sites?page=1&per_page={{per_page}}{{qs_host}}" {% if page<=1 %}aria-disabled="true"{% endif %}>« first</a>
-  <a href="/sites?page={{page-1}}&per_page={{per_page}}{{qs_host}}" {% if page<=1 %}aria-disabled="true"{% endif %}>‹ prev</a>
+  <a href="/snapshots?page=1&per_page={{per_page}}{{qs_host}}" {% if page<=1 %}aria-disabled="true"{% endif %}>« first</a>
+  <a href="/snapshots?page={{page-1}}&per_page={{per_page}}{{qs_host}}" {% if page<=1 %}aria-disabled="true"{% endif %}>‹ prev</a>
   <span>page {{page}} / {{pages}}</span>
-  <a href="/sites?page={{page+1}}&per_page={{per_page}}{{qs_host}}" {% if page>=pages %}aria-disabled="true"{% endif %}>next ›</a>
-  <a href="/sites?page={{pages}}&per_page={{per_page}}{{qs_host}}" {% if page>=pages %}aria-disabled="true"{% endif %}>last »</a>
+  <a href="/snapshots?page={{page+1}}&per_page={{per_page}}{{qs_host}}" {% if page>=pages %}aria-disabled="true"{% endif %}>next ›</a>
+  <a href="/snapshots?page={{pages}}&per_page={{per_page}}{{qs_host}}" {% if page>=pages %}aria-disabled="true"{% endif %}>last »</a>
   &nbsp;per page:
   {% for n in sizes %}
-    <a href="/sites?page=1&per_page={{n}}{{qs_host}}" {% if n == per_page %}style="font-weight:bold"{% endif %}>{% if n >= 100000 %}All{% else %}{{n}}{% endif %}</a>
+    <a href="/snapshots?page=1&per_page={{n}}{{qs_host}}" {% if n == per_page %}style="font-weight:bold"{% endif %}>{% if n >= 100000 %}All{% else %}{{n}}{% endif %}</a>
   {% endfor %}
 </nav>
 </form>
 
 <script>
 (function(){
-  const f = document.querySelector('form[action="/sites/bulk-action"]');
+  const f = document.querySelector('form[action="/snapshots/bulk-action"]');
   if (!f) return;
   const refresh = () => {
     const n = f.querySelectorAll('input[name=snapshot]:checked').length;

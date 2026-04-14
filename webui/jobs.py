@@ -149,7 +149,7 @@ def count_jobs(status: Optional[str] = None) -> int:
 
 
 def delete_many(ids: list[int]) -> int:
-    """Delete job rows. Leaves any archived files on disk — use /sites to remove snapshots."""
+    """Delete job rows. Leaves any archived files on disk — use /snapshots to remove them."""
     if not ids:
         return 0
     # Cancel any still-active runs first so we don't leave orphaned subprocesses.

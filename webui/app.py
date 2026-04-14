@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from . import jobs, scheduler
-from .routes import dashboard, browser, schedules as schedules_routes, diff, targets
+from .routes import dashboard, browser, schedules as schedules_routes, diff, sites as sites_routes
 
 BASE = Path(__file__).parent
 
@@ -45,4 +45,4 @@ app.include_router(dashboard.router)
 app.include_router(browser.router)
 app.include_router(schedules_routes.router)
 app.include_router(diff.router)
-app.include_router(targets.router)
+app.include_router(sites_routes.router)

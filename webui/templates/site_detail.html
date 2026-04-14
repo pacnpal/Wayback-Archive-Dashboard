@@ -2,11 +2,11 @@
 {% block title %}{{ host }}{% endblock %}
 {% block content %}
 <h2>{{ host }}</h2>
-<p><a href="/targets">← all sites</a> · <a href="/sites?host={{host}}">manage snapshots</a></p>
+<p><a href="/sites">← all sites</a> · <a href="/snapshots?host={{host}}">manage snapshots</a></p>
 
 <section>
   <h3>Archive now</h3>
-  <form method="post" action="/targets/{{host}}/archive" style="display:flex;gap:.5rem;align-items:end;flex-wrap:wrap">
+  <form method="post" action="/sites/{{host}}/archive" style="display:flex;gap:.5rem;align-items:end;flex-wrap:wrap">
     <label>Snapshot
       <input type="text" name="timestamp" list="remote-ts" placeholder="YYYYMMDDHHMMSS or blank for latest" style="min-width:20rem" id="ts-input">
       <datalist id="remote-ts">

@@ -1,4 +1,4 @@
-"""Per-host (target URL) overview: local + remote snapshots + date picker."""
+"""Per-site (host) overview: local + remote snapshots + date picker."""
 from __future__ import annotations
 from pathlib import Path
 from collections import defaultdict
@@ -33,16 +33,16 @@ def _local_snapshots(host: str) -> list[str]:
     return sorted((s.name for s in d.iterdir() if s.is_dir()), reverse=True)
 
 
-@router.get("/targets", response_class=HTMLResponse)
-async def targets_index(request: Request):
-    return templates.TemplateResponse("targets_index.html", {
+@router.get("/sites", response_class=HTMLResponse)
+async def sites_index(request: Request):
+    return templates.TemplateResponse("sites_index.html", {
         "request": request, "hosts": _local_hosts(),
     })
 
 
-@router.get("/targets/{host}", response_class=HTMLResponse)
-async def target_detail(request: Request, host: str, from_year: str = "", to_year: str = "",
-                         remote: int = 1):
+@router.get("/sites/{host}", response_class=HTMLResponse)
+async def site_detail(request: Request, host: str, from_year: str = "", to_year: str = "",
+                       remote: int = 1):
     local = _local_snapshots(host)
     remote_snaps: list[dict] = []
     remote_error = None
@@ -70,7 +70,7 @@ async def target_detail(request: Request, host: str, from_year: str = "", to_yea
     days_sorted = sorted(by_day.keys(), reverse=True)
     local_set = set(local)
 
-    return templates.TemplateResponse("target_detail.html", {
+    return templates.TemplateResponse("site_detail.html", {
         "request": request,
         "host": host,
         "local": local,
@@ -86,10 +86,10 @@ async def target_detail(request: Request, host: str, from_year: str = "", to_yea
     })
 
 
-@router.post("/targets/{host}/archive")
+@router.post("/sites/{host}/archive")
 async def archive_one(host: str, request: Request):
     form = await request.form()
     ts = (form.get("timestamp") or "").strip() or None
     from .dashboard import _default_flags
     jobs.enqueue(f"https://{host}", ts, _default_flags())
-    return RedirectResponse(f"/targets/{host}", status_code=303)
+    return RedirectResponse(f"/sites/{host}", status_code=303)

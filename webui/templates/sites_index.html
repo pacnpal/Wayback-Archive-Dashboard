@@ -2,7 +2,7 @@
 {% block title %}Sites{% endblock %}
 {% block content %}
 <h2>Sites</h2>
-<form method="get" action="" onsubmit="location.href='/targets/'+encodeURIComponent(this.host.value.trim().replace(/^https?:\/\//,'').replace(/\/.*$/,''));return false">
+<form method="get" action="" onsubmit="location.href='/sites/'+encodeURIComponent(this.host.value.trim().replace(/^https?:\/\//,'').replace(/\/.*$/,''));return false">
   <label>Look up any host:
     <input type="text" name="host" required placeholder="example.com">
   </label>
@@ -18,10 +18,10 @@
   <tbody>
   {% for host, n, newest in hosts %}
     <tr>
-      <td class="mono"><a href="/targets/{{host}}">{{ host }}</a></td>
+      <td class="mono"><a href="/sites/{{host}}">{{ host }}</a></td>
       <td>{{ n }}</td>
       <td class="mono ts-cell">{{ newest[0:4] }}-{{ newest[4:6] }}-{{ newest[6:8] }}<br>{{ newest[8:10] }}:{{ newest[10:12] }}:{{ newest[12:14] }}</td>
-      <td><a href="/sites?host={{host}}">snapshots →</a></td>
+      <td><a href="/snapshots?host={{host}}">snapshots →</a></td>
     </tr>
   {% endfor %}
   </tbody>

@@ -43,7 +43,7 @@ def _all_snapshots() -> list[tuple[str, str]]:
     return out
 
 
-@router.get("/sites", response_class=HTMLResponse)
+@router.get("/snapshots", response_class=HTMLResponse)
 async def sites(request: Request, page: int = 1, per_page: int = 50, host: str = ""):
     items = _all_snapshots()
     if host:
@@ -55,7 +55,7 @@ async def sites(request: Request, page: int = 1, per_page: int = 50, host: str =
     start = (page - 1) * per_page
     slice_ = items[start:start + per_page]
     hosts_all = sorted({h for h, _ in _all_snapshots()})
-    return templates.TemplateResponse("sites.html", {
+    return templates.TemplateResponse("snapshots.html", {
         "request": request, "items": slice_, "page": page, "pages": pages,
         "per_page": per_page, "total": total, "host": host, "hosts_all": hosts_all,
     })
@@ -73,7 +73,7 @@ def _delete_snapshot(host: str, ts: str) -> bool:
     return True
 
 
-@router.post("/sites/bulk-action")
+@router.post("/snapshots/bulk-action")
 async def sites_bulk_action(request: Request):
     form = await request.form()
     for entry in form.getlist("snapshot"):
@@ -81,7 +81,7 @@ async def sites_bulk_action(request: Request):
             continue
         h, t = entry.split("/", 1)
         _delete_snapshot(h, t)
-    return RedirectResponse("/sites", status_code=303)
+    return RedirectResponse("/snapshots", status_code=303)
 
 
 @router.post("/sites/{host}/delete-all")
@@ -90,7 +90,7 @@ async def delete_host(host: str):
     target = (jobs.OUTPUT_ROOT / host).resolve()
     if base in target.parents and target.is_dir():
         shutil.rmtree(target)
-    return RedirectResponse("/sites", status_code=303)
+    return RedirectResponse("/snapshots", status_code=303)
 
 
 @router.get("/sites/{host}/tree", response_class=HTMLResponse)
