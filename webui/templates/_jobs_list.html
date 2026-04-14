@@ -19,19 +19,26 @@
         onchange="htmx.trigger(this, 'submit')">
     <input type="hidden" name="sort" value="{{sort}}">
     <input type="hidden" name="dir" value="{{dir}}">
-    <label class="filter-select"><span>Status</span>
-      <select name="statuses" multiple size="1" class="multi-combo">
-        {% for s in ['pending','running','ok','error','cancelled'] %}
-          <option value="{{s}}" {% if s in selected_statuses %}selected{% endif %}>{{s}}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <label class="filter-select"><span>Type</span>
-      <select name="types" multiple size="1" class="multi-combo">
-        <option value="archive" {% if 'archive' in selected_types %}selected{% endif %}>archive</option>
-        <option value="repair"  {% if 'repair'  in selected_types %}selected{% endif %}>repair</option>
-      </select>
-    </label>
+    <div class="filter-select"><span>Status</span>
+      <div class="multi-combo" data-label="Any status">
+        <div class="multi-combo__trigger" role="button" tabindex="0"><span class="multi-combo__label">Any status</span></div>
+        <div class="multi-combo__menu">
+          {% for s in ['pending','running','ok','error','cancelled'] %}
+            <label><input type="checkbox" name="statuses" value="{{s}}"
+              {% if s in selected_statuses %}checked{% endif %}> {{s}}</label>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+    <div class="filter-select"><span>Type</span>
+      <div class="multi-combo" data-label="Any type">
+        <div class="multi-combo__trigger" role="button" tabindex="0"><span class="multi-combo__label">Any type</span></div>
+        <div class="multi-combo__menu">
+          <label><input type="checkbox" name="types" value="archive" {% if 'archive' in selected_types %}checked{% endif %}> archive</label>
+          <label><input type="checkbox" name="types" value="repair"  {% if 'repair'  in selected_types %}checked{% endif %}> repair</label>
+        </div>
+      </div>
+    </div>
     <label class="filter-select"><span>Per page</span>
       <select name="per_page">
         {% for n in sizes %}
