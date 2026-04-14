@@ -28,14 +28,22 @@
 
 <table>
   <thead><tr>
-    {% set sort_qs %}per_page={{per_page}}{% if status %}&status={{status}}{% endif %}{% endset %}
+    {% macro hx_sort(key, label) -%}
+      {%- set next_dir = 'asc' if (sort == key and dir == 'desc') else 'desc' -%}
+      {%- set url = '/jobs/list?sort=' ~ key ~ '&dir=' ~ next_dir ~ '&per_page=' ~ per_page -%}
+      {%- if status %}{%- set url = url ~ '&status=' ~ status -%}{%- endif -%}
+      <a href="#" hx-get="{{url}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML"
+         {% if sort == key %}aria-sort="{{ 'descending' if dir == 'desc' else 'ascending' }}" style="font-weight:700"{% endif %}>
+        {{ label }}{% if sort == key %} <span aria-hidden="true">{{ '▼' if dir == 'desc' else '▲' }}</span>{% endif %}
+      </a>
+    {%- endmacro %}
     <th><input type="checkbox" onclick="this.closest('form').querySelectorAll('input[name=job_id]').forEach(c=>c.checked=this.checked)"></th>
-    <th>{{ lh.sort_link('id', '#', sort, dir, sort_qs) }}</th>
-    <th>{{ lh.sort_link('url', 'URL', sort, dir, sort_qs) }}</th>
-    <th>{{ lh.sort_link('ts', 'Snapshot', sort, dir, sort_qs) }}</th>
-    <th>{{ lh.sort_link('status', 'Status', sort, dir, sort_qs) }}</th>
-    <th>{{ lh.sort_link('started', 'Started', sort, dir, sort_qs) }}</th>
-    <th>{{ lh.sort_link('finished', 'Finished', sort, dir, sort_qs) }}</th>
+    <th>{{ hx_sort('id', '#') }}</th>
+    <th>{{ hx_sort('url', 'URL') }}</th>
+    <th>{{ hx_sort('ts', 'Snapshot') }}</th>
+    <th>{{ hx_sort('status', 'Status') }}</th>
+    <th>{{ hx_sort('started', 'Started') }}</th>
+    <th>{{ hx_sort('finished', 'Finished') }}</th>
     <th></th>
   </tr></thead>
   <tbody>
