@@ -40,6 +40,10 @@ def build_wayback_url(target_url: str, timestamp: Optional[str] = None) -> str:
     return f"https://web.archive.org/web/{ts}/{target_url}"
 
 
+class WaybackUnreachable(RuntimeError):
+    pass
+
+
 def list_snapshots(url: str, from_year: Optional[int] = None, to_year: Optional[int] = None, limit: int = 500, collapse_digits: int = 8) -> list[dict]:
     key = f"{url}|{from_year}|{to_year}|{limit}|{collapse_digits}"
     now = time.time()
@@ -61,8 +65,20 @@ def list_snapshots(url: str, from_year: Optional[int] = None, to_year: Optional[
     q = urllib.parse.urlencode(params)
     cdx = f"https://web.archive.org/cdx/search/cdx?{q}"
     req = urllib.request.Request(cdx, headers={"User-Agent": "Wayback-Archive-Dashboard/1.0"})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        data = json.load(r)
+    last_err: Optional[Exception] = None
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                data = json.load(r)
+            break
+        except Exception as e:
+            last_err = e
+            time.sleep(1.5 * (attempt + 1))
+    else:
+        raise WaybackUnreachable(
+            f"Wayback Machine (web.archive.org) is not reachable right now: {last_err}. "
+            f"This is usually a temporary Internet Archive outage — try again in a few minutes."
+        )
     out: list[dict] = []
     if data and isinstance(data, list) and len(data) > 1:
         header = data[0]
