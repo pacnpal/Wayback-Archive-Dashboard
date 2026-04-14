@@ -83,20 +83,35 @@
         <label class="opt"><span class="opt-label">To year</span><input type="number" name="to_year" min="1996" max="2099" placeholder="any"></label>
         <label class="opt"><span class="opt-label">Max jobs</span><input type="number" name="max_count" min="1" max="500" value="50"></label>
       </fieldset>
+      <fieldset class="opt-group">
+        <legend>Concurrency</legend>
+        <label class="opt">
+          <span class="opt-label">Parallel downloads</span>
+          <input type="number" id="bulk-parallel" min="1" max="20" value="{{ max_concurrent }}">
+          <small class="opt-help">How many jobs run at once (1–20). Saved globally; new jobs pick it up immediately.</small>
+        </label>
+        <button type="button" class="secondary" style="padding:.2rem .6rem"
+                onclick="saveConcurrency(this)">Save</button>
+        <small id="bulk-parallel-msg" style="margin-left:.5rem"></small>
+      </fieldset>
     </div>
+    <script>
+    async function saveConcurrency(btn) {
+      const v = document.getElementById('bulk-parallel').value;
+      const msg = document.getElementById('bulk-parallel-msg');
+      btn.disabled = true; msg.textContent = 'saving…';
+      try {
+        const fd = new FormData(); fd.append('max_concurrent', v);
+        const r = await fetch('/settings/max-concurrent', {method:'POST', body: fd, redirect: 'manual'});
+        msg.textContent = '✓ saved';
+      } catch(e) { msg.textContent = 'error: ' + e; }
+      finally { btn.disabled = false; setTimeout(()=>msg.textContent='', 2000); }
+    }
+    </script>
     <small>Uses the default option flags. Edit individual jobs afterward if needed.</small><br>
     <button type="submit">Enqueue bulk</button>
   </form>
 </details>
-
-<hr>
-<form method="post" action="/settings/max-concurrent" style="display:flex;gap:.5rem;align-items:center;margin-bottom:.5rem">
-  <label>Parallel downloads
-    <input type="number" name="max_concurrent" min="1" max="20" value="{{ max_concurrent }}" style="width:5rem">
-  </label>
-  <button type="submit" class="secondary" style="padding:.2rem .5rem">Save</button>
-  <small>How many archive jobs run at once (1–20). Applies to new jobs immediately.</small>
-</form>
 
 <h2>Jobs</h2>
 <div class="jobs-wrap" hx-get="/jobs/list" hx-trigger="load, every 5s"
