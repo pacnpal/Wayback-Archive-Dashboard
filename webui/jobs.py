@@ -104,7 +104,19 @@ def init_db() -> None:
                         pass
 
 
+def _normalize_target(url: str) -> str:
+    """Ensure URL has a path so upstream's HTML/asset detection works.
+    `https://example.com` → `https://example.com/` (empty path breaks link extraction)."""
+    from urllib.parse import urlparse, urlunparse
+    p = urlparse(url)
+    if p.scheme and p.netloc and not p.path:
+        p = p._replace(path="/")
+        return urlunparse(p)
+    return url
+
+
 def enqueue(target_url: str, timestamp: Optional[str], flags: dict, schedule_id: Optional[int] = None) -> int:
+    target_url = _normalize_target(target_url)
     if timestamp:
         resolved_ts, resolved_url = timestamp, target_url
     else:
@@ -112,6 +124,7 @@ def enqueue(target_url: str, timestamp: Optional[str], flags: dict, schedule_id:
         if not latest:
             raise ValueError(f"No Wayback snapshots found for {target_url}")
         resolved_ts, resolved_url = latest
+        resolved_url = _normalize_target(resolved_url)
     host = wayback.host_of(resolved_url)
     site_dir = str(OUTPUT_ROOT / host / resolved_ts)
     log_path = str(Path(site_dir) / ".log")
