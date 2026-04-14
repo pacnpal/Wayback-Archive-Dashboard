@@ -14,6 +14,27 @@
 {% if not hosts %}
   <p>None yet.</p>
 {% else %}
+{% set sizes = [25, 50, 100, 200, 500] | select("le", total) | list %}
+{% if not sizes %}{% set sizes = [50] %}{% endif %}
+{% if total > sizes[-1] %}{% set _ = sizes.append(100000) %}{% endif %}
+{% set qs_keep = "sort=" ~ sort ~ "&dir=" ~ dir %}
+
+<div class="list-toolbar">
+  <form method="get" style="display:inline-flex;align-items:end;gap:.3rem">
+    <input type="hidden" name="sort" value="{{sort}}">
+    <input type="hidden" name="dir"  value="{{dir}}">
+    <label class="per-page-wrap">Per page
+      <select name="per_page" onchange="this.form.submit()">
+        {% for n in sizes %}
+          <option value="{{n}}" {% if n == per_page %}selected{% endif %}>{% if n >= 100000 %}All{% else %}{{n}}{% endif %}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </form>
+  <span style="margin-left:auto;font-size:.85rem;color:var(--pico-muted-color)">{{ total }} host{{ 's' if total!=1 else '' }}</span>
+</div>
+
+<div class="table-scroll">
 <table>
   <thead><tr>
     <th>{{ lh.sort_link('host', 'Host', sort, dir) }}</th>
@@ -27,10 +48,19 @@
       <td class="mono"><a href="/sites/{{host}}">{{ host }}</a></td>
       <td>{{ n }}</td>
       <td class="mono ts-cell">{{ newest[0:4] }}-{{ newest[4:6] }}-{{ newest[6:8] }}<br>{{ newest[8:10] }}:{{ newest[10:12] }}:{{ newest[12:14] }}</td>
-      <td><a href="/snapshots?host={{host}}">snapshots →</a></td>
+      <td><a href="/snapshots?hosts={{host}}">snapshots →</a></td>
     </tr>
   {% endfor %}
   </tbody>
 </table>
+</div>
+
+<nav class="pager">
+  <a href="?{{qs_keep}}&page=1&per_page={{per_page}}" {% if page<=1 %}aria-disabled="true"{% endif %}>« first</a>
+  <a href="?{{qs_keep}}&page={{page-1}}&per_page={{per_page}}" {% if page<=1 %}aria-disabled="true"{% endif %}>‹ prev</a>
+  <span>page {{page}} / {{pages}}</span>
+  <a href="?{{qs_keep}}&page={{page+1}}&per_page={{per_page}}" {% if page>=pages %}aria-disabled="true"{% endif %}>next ›</a>
+  <a href="?{{qs_keep}}&page={{pages}}&per_page={{per_page}}" {% if page>=pages %}aria-disabled="true"{% endif %}>last »</a>
+</nav>
 {% endif %}
 {% endblock %}

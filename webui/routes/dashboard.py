@@ -79,12 +79,25 @@ def _sort_from_cookie(request: Request, name: str, default: tuple[str, str]) -> 
     return col, d
 
 
+def _split_csv(v: str) -> list[str]:
+    return [x for x in (p.strip() for p in (v or "").split(",")) if x]
+
+
+def _parse_filter_cookie(raw: str) -> dict:
+    out = {}
+    for kv in (raw or "").split(";"):
+        if "=" in kv:
+            k, v = kv.split("=", 1)
+            out[k.strip()] = v.strip()
+    return out
+
+
 @router.get("/jobs/list", response_class=HTMLResponse)
-async def jobs_list(request: Request, page: int = 1, per_page: int = 25,
-                    status: str = "", sort: str = "", dir: str = ""):
+async def jobs_list(request: Request, page: int = 1, per_page: int = 0,
+                    status: str = "", sort: str = "", dir: str = "",
+                    statuses: str = "", types: str = ""):
     page = max(1, page)
-    per_page = max(5, min(per_page, 100000))
-    explicit = bool(sort or dir)
+    explicit_sort = bool(sort or dir)
     if not sort or not dir:
         csort, cdir = _sort_from_cookie(request, "jobs", ("id", "desc"))
         sort = sort or csort
@@ -93,12 +106,42 @@ async def jobs_list(request: Request, page: int = 1, per_page: int = 25,
         sort = "id"
     if dir not in ("asc", "desc"):
         dir = "desc"
-    st = status or None
-    total = jobs.count_jobs(st)
+
+    # Starlette query params — accept both ?statuses=a,b and ?statuses=a&statuses=b
+    qs_statuses: list[str] = []
+    for v in request.query_params.getlist("statuses"):
+        qs_statuses.extend(_split_csv(v))
+    qs_types: list[str] = []
+    for v in request.query_params.getlist("types"):
+        qs_types.extend(_split_csv(v))
+    explicit_filter = bool(
+        request.query_params.getlist("statuses") or
+        request.query_params.getlist("types") or
+        request.query_params.get("per_page")
+    )
+
+    cookie = _parse_filter_cookie(request.cookies.get("filter_jobs") or "")
+    if not qs_statuses:
+        qs_statuses = _split_csv(cookie.get("statuses", ""))
+    if not qs_types:
+        qs_types = _split_csv(cookie.get("types", ""))
+    if per_page <= 0:
+        try:
+            per_page = int(cookie.get("per_page") or 25)
+        except ValueError:
+            per_page = 25
+    per_page = max(5, min(per_page, 100000))
+
+    legacy_status = status or None
+    if legacy_status and not qs_statuses:
+        qs_statuses = [legacy_status]
+
+    total = jobs.count_jobs(statuses=qs_statuses, types=qs_types)
     pages = max(1, (total + per_page - 1) // per_page)
     page = min(page, pages)
     rows = jobs.list_jobs(limit=per_page, offset=(page - 1) * per_page,
-                          status=st, sort=sort, dir=dir)
+                          sort=sort, dir=dir,
+                          statuses=qs_statuses, types=qs_types)
     import json as _json
     from .. import job_progress
     progress = {}
@@ -115,12 +158,16 @@ async def jobs_list(request: Request, page: int = 1, per_page: int = 25,
             progress[r["id"]] = p
     resp = templates.TemplateResponse("_jobs_list.html", {
         "request": request, "jobs": rows, "page": page, "pages": pages,
-        "per_page": per_page, "total": total, "status": status,
+        "per_page": per_page, "total": total,
+        "selected_statuses": qs_statuses, "selected_types": qs_types,
         "sort": sort, "dir": dir, "progress": progress,
     })
-    if explicit:
+    if explicit_sort:
         resp.set_cookie("sort_jobs", f"{sort}:{dir}", max_age=60 * 60 * 24 * 365,
                         samesite="lax")
+    if explicit_filter:
+        val = f"statuses={','.join(qs_statuses)};types={','.join(qs_types)};per_page={per_page}"
+        resp.set_cookie("filter_jobs", val, max_age=60 * 60 * 24 * 365, samesite="lax")
     return resp
 
 

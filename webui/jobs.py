@@ -207,16 +207,39 @@ JOB_SORT_COLS = {
 }
 
 
+_VALID_STATUSES = {"pending", "running", "ok", "error", "cancelled"}
+_VALID_TYPES = {"archive", "repair"}
+
+
+def _filter_clauses(statuses: Optional[list[str]], types: Optional[list[str]]) -> tuple[str, list]:
+    parts: list[str] = []
+    args: list = []
+    if statuses:
+        clean = [s for s in statuses if s in _VALID_STATUSES]
+        if clean:
+            parts.append(f"status IN ({','.join('?' * len(clean))})")
+            args.extend(clean)
+    if types:
+        clean_t = [t for t in types if t in _VALID_TYPES]
+        if clean_t and set(clean_t) != _VALID_TYPES:
+            if clean_t == ["archive"]:
+                parts.append("repair_paths_json IS NULL")
+            elif clean_t == ["repair"]:
+                parts.append("repair_paths_json IS NOT NULL")
+    where = ("WHERE " + " AND ".join(parts)) if parts else ""
+    return where, args
+
+
 def list_jobs(limit: int = 25, offset: int = 0, status: Optional[str] = None,
-              sort: str = "id", dir: str = "desc") -> list[sqlite3.Row]:
+              sort: str = "id", dir: str = "desc",
+              statuses: Optional[list[str]] = None,
+              types: Optional[list[str]] = None) -> list[sqlite3.Row]:
+    if status and not statuses:
+        statuses = [status]
     col = JOB_SORT_COLS.get(sort, "id")
     direction = "ASC" if dir == "asc" else "DESC"
-    where = ""
-    args: list = []
-    if status:
-        where = "WHERE status=?"
-        args.append(status)
-    args.extend([limit, offset])
+    where, args = _filter_clauses(statuses, types)
+    args = args + [limit, offset]
     with connect() as c:
         return c.execute(
             f"SELECT * FROM jobs {where} ORDER BY {col} {direction}, id DESC "
@@ -224,11 +247,14 @@ def list_jobs(limit: int = 25, offset: int = 0, status: Optional[str] = None,
         ).fetchall()
 
 
-def count_jobs(status: Optional[str] = None) -> int:
+def count_jobs(status: Optional[str] = None,
+               statuses: Optional[list[str]] = None,
+               types: Optional[list[str]] = None) -> int:
+    if status and not statuses:
+        statuses = [status]
+    where, args = _filter_clauses(statuses, types)
     with connect() as c:
-        if status:
-            return c.execute("SELECT COUNT(*) FROM jobs WHERE status=?", (status,)).fetchone()[0]
-        return c.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+        return c.execute(f"SELECT COUNT(*) FROM jobs {where}", args).fetchone()[0]
 
 
 def delete_many(ids: list[int]) -> int:

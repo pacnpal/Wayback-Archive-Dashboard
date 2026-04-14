@@ -14,7 +14,28 @@
   .status-cancelled { color: #8a8a8a; font-style: italic; }
   table { font-size: 0.9rem; }
   .ts-cell { font-size: 0.78rem; white-space: nowrap; line-height: 1.2; }
-  .type-cell { width: 2rem; text-align: center; font-size: 1.1rem; color: var(--pico-muted-color); }
+  .type-cell { width: 3rem; text-align: center; }
+  .type-badge { display: inline-block; min-width: 2rem; padding: 1px 6px; border-radius: 999px; font-size: .7rem; font-weight: 700; letter-spacing: .05em; text-align: center; line-height: 1.4; }
+  .type-badge.archive { background: #e0f2fe; color: #0369a1; }
+  .type-badge.repair  { background: #fef3c7; color: #a16207; }
+  .list-toolbar { display: flex; gap: 1rem; align-items: end; flex-wrap: wrap; margin: .3rem 0 .6rem; }
+  .list-toolbar > * { margin: 0; }
+  .inline-chips { border: 0; padding: 0; margin: 0; display: flex; gap: .4rem .6rem; align-items: center; flex-wrap: wrap; }
+  .inline-chips legend { float: none; padding: 0; font-size: .72rem; color: var(--pico-muted-color); text-transform: uppercase; letter-spacing: .05em; margin-right: .25rem; }
+  .inline-chips label { font-size: .85rem; display: inline-flex; align-items: center; gap: .2rem; margin: 0; }
+  .inline-chips input[type=checkbox] { margin: 0; }
+  .per-page-wrap { display: inline-flex; align-items: center; gap: .3rem; font-size: .78rem; color: var(--pico-muted-color); text-transform: uppercase; letter-spacing: .05em; }
+  .per-page-wrap select { margin: 0; padding: .15rem .4rem; width: auto; }
+  .table-scroll { overflow-x: auto; margin: 0 -.25rem; padding: 0 .25rem; }
+  .pager { display: flex; gap: .4rem; align-items: center; justify-content: center; margin-top: .5rem; flex-wrap: wrap; }
+  @media (max-width: 600px) {
+    body { margin: .5rem auto; padding: 0 .5rem; }
+    .list-toolbar { gap: .4rem; }
+    .inline-chips legend { display: inline; margin-right: .3rem; }
+    .ts-cell { font-size: 0.7rem; }
+    .secondary { min-height: 2rem; }
+    nav ul { flex-wrap: wrap; row-gap: .2rem; }
+  }
   .progress-bar { height: 4px; background: var(--pico-muted-border-color); border-radius: 2px; margin-top: 2px; overflow: hidden; }
   .progress-bar span { display: block; height: 100%; background: #2a9d8f; transition: width .3s; }
   .mono, code, pre { font-family: ui-monospace, monospace; }

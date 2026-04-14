@@ -35,9 +35,20 @@
   <h3 style="display:flex;gap:.5rem;align-items:center">
     Local snapshots <small style="font-weight:normal;color:var(--pico-muted-color)">— {{ total }}</small>
     {% if total %}
-    <form method="post" action="/sites/{{host}}/rewrite-links" style="margin-left:auto"
+    <form method="get" style="margin-left:auto;display:inline-flex;align-items:center;gap:.3rem">
+      <input type="hidden" name="sort" value="{{sort}}">
+      <input type="hidden" name="dir" value="{{dir}}">
+      <label class="per-page-wrap">Per page
+        <select name="per_page" onchange="this.form.submit()">
+          {% for n in sizes %}
+            <option value="{{n}}" {% if n == per_page %}selected{% endif %}>{% if n >= 100000 %}All{% else %}{{n}}{% endif %}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </form>
+    <form method="post" action="/sites/{{host}}/rewrite-links"
           onsubmit="return confirm('Rewrite absolute URLs inside HTML/CSS of ALL {{total}} snapshots of {{host}}?');">
-      <button type="submit" class="secondary" style="padding:.2rem .6rem;font-size:.85rem">Fix links in all snapshots</button>
+      <button type="submit" class="secondary" style="padding:.2rem .6rem;font-size:.85rem">Fix links in all</button>
     </form>
     <form method="post" action="/sites/{{host}}/audit">
       <button type="submit" class="secondary" style="padding:.2rem .6rem;font-size:.85rem">Audit all</button>
@@ -56,6 +67,7 @@
   {% if total == 0 %}
   <p>None archived yet.</p>
   {% else %}
+  <div class="table-scroll">
   <table>
     <thead>
       <tr>
@@ -108,6 +120,7 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 
   <nav class="pager" style="display:flex;gap:.4rem;align-items:center;justify-content:center;margin-top:.5rem;flex-wrap:wrap">
     <a href="?{{qs_keep}}&page=1&per_page={{per_page}}" {% if page<=1 %}aria-disabled="true"{% endif %}>« first</a>
@@ -115,10 +128,6 @@
     <span>page {{page}} / {{pages}}</span>
     <a href="?{{qs_keep}}&page={{page+1}}&per_page={{per_page}}" {% if page>=pages %}aria-disabled="true"{% endif %}>next ›</a>
     <a href="?{{qs_keep}}&page={{pages}}&per_page={{per_page}}" {% if page>=pages %}aria-disabled="true"{% endif %}>last »</a>
-    &nbsp;per page:
-    {% for n in sizes %}
-      <a href="?{{qs_keep}}&page=1&per_page={{n}}" {% if n == per_page %}style="font-weight:bold"{% endif %}>{% if n >= 100000 %}All{% else %}{{n}}{% endif %}</a>
-    {% endfor %}
   </nav>
   {% endif %}
 </section>

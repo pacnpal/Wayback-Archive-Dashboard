@@ -54,9 +54,9 @@ def _all_snapshots() -> list[dict]:
 
 
 @router.get("/snapshots", response_class=HTMLResponse)
-async def sites(request: Request, page: int = 1, per_page: int = 50, host: str = "",
+async def sites(request: Request, page: int = 1, per_page: int = 0, host: str = "",
                 sort: str = "", dir: str = ""):
-    explicit = bool(sort or dir)
+    explicit_sort = bool(sort or dir)
     if not sort or not dir:
         raw = request.cookies.get("sort_snapshots") or ""
         c, _, d = raw.partition(":")
@@ -67,9 +67,34 @@ async def sites(request: Request, page: int = 1, per_page: int = 50, host: str =
     if dir not in ("asc", "desc"):
         dir = "desc"
     reverse = (dir == "desc")
+
+    # Multi-host + per-page with cookie persistence.
+    qs_hosts: list[str] = []
+    for v in request.query_params.getlist("hosts"):
+        qs_hosts.extend([x for x in (p.strip() for p in v.split(",")) if x])
+    explicit_filter = bool(
+        request.query_params.getlist("hosts") or
+        request.query_params.get("per_page")
+    )
+    cookie_raw = request.cookies.get("filter_snapshots") or ""
+    cookie = {}
+    for kv in cookie_raw.split(";"):
+        if "=" in kv:
+            k, v = kv.split("=", 1)
+            cookie[k.strip()] = v.strip()
+    if not qs_hosts:
+        qs_hosts = [x for x in (p.strip() for p in cookie.get("hosts", "").split(",")) if x]
+    if per_page <= 0:
+        try:
+            per_page = int(cookie.get("per_page") or 50)
+        except ValueError:
+            per_page = 50
+    if host and host not in qs_hosts:  # back-compat single-value ?host=
+        qs_hosts = [host]
+
     items = _all_snapshots()
-    if host:
-        items = [i for i in items if i["host"] == host]
+    if qs_hosts:
+        items = [i for i in items if i["host"] in qs_hosts]
     key_map = {
         "host": lambda r: (r["host"], r["ts"]),
         "ts": lambda r: (r["ts"], r["host"]),
@@ -86,11 +111,16 @@ async def sites(request: Request, page: int = 1, per_page: int = 50, host: str =
     hosts_all = sorted({r["host"] for r in _all_snapshots()})
     resp = templates.TemplateResponse("snapshots.html", {
         "request": request, "items": slice_, "page": page, "pages": pages,
-        "per_page": per_page, "total": total, "host": host, "hosts_all": hosts_all,
+        "per_page": per_page, "total": total,
+        "selected_hosts": qs_hosts, "hosts_all": hosts_all,
         "sort": sort, "dir": dir,
     })
-    if explicit:
+    if explicit_sort:
         resp.set_cookie("sort_snapshots", f"{sort}:{dir}",
+                        max_age=60 * 60 * 24 * 365, samesite="lax")
+    if explicit_filter:
+        val = f"hosts={','.join(qs_hosts)};per_page={per_page}"
+        resp.set_cookie("filter_snapshots", val,
                         max_age=60 * 60 * 24 * 365, samesite="lax")
     return resp
 

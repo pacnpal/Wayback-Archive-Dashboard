@@ -35,8 +35,9 @@ HOSTS_SORT_KEYS = {"host", "count", "newest"}
 
 
 @router.get("/sites", response_class=HTMLResponse)
-async def sites_index_route(request: Request, sort: str = "", dir: str = ""):
-    explicit = bool(sort or dir)
+async def sites_index_route(request: Request, sort: str = "", dir: str = "",
+                            page: int = 1, per_page: int = 0):
+    explicit_sort = bool(sort or dir)
     if not sort or not dir:
         raw = request.cookies.get("sort_sites") or ""
         c, _, d = raw.partition(":")
@@ -47,6 +48,18 @@ async def sites_index_route(request: Request, sort: str = "", dir: str = ""):
     if dir not in ("asc", "desc"):
         dir = "asc"
     reverse = (dir == "desc")
+
+    explicit_filter = bool(request.query_params.get("per_page"))
+    cookie_pp = None
+    raw_f = request.cookies.get("filter_sites") or ""
+    for kv in raw_f.split(";"):
+        if kv.startswith("per_page="):
+            try: cookie_pp = int(kv.split("=", 1)[1])
+            except ValueError: pass
+    if per_page <= 0:
+        per_page = cookie_pp or 50
+    per_page = max(1, min(per_page, 100000))
+
     hosts = _local_hosts()
     key_map = {
         "host": lambda t: t[0],
@@ -54,11 +67,20 @@ async def sites_index_route(request: Request, sort: str = "", dir: str = ""):
         "newest": lambda t: t[2],
     }
     hosts.sort(key=key_map[sort], reverse=reverse)
+    total = len(hosts)
+    pages = max(1, (total + per_page - 1) // per_page) if total else 1
+    page = max(1, min(page, pages))
+    start = (page - 1) * per_page
+    slice_ = hosts[start:start + per_page]
     resp = templates.TemplateResponse("sites_index.html", {
-        "request": request, "hosts": hosts, "sort": sort, "dir": dir,
+        "request": request, "hosts": slice_, "sort": sort, "dir": dir,
+        "page": page, "pages": pages, "per_page": per_page, "total": total,
     })
-    if explicit:
+    if explicit_sort:
         resp.set_cookie("sort_sites", f"{sort}:{dir}",
+                        max_age=60 * 60 * 24 * 365, samesite="lax")
+    if explicit_filter:
+        resp.set_cookie("filter_sites", f"per_page={per_page}",
                         max_age=60 * 60 * 24 * 365, samesite="lax")
     return resp
 
