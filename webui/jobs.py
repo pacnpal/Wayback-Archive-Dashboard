@@ -78,17 +78,19 @@ def init_db() -> None:
 
 def enqueue(target_url: str, timestamp: Optional[str], flags: dict, schedule_id: Optional[int] = None) -> int:
     host = wayback.host_of(target_url)
-    ts = timestamp or datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-    site_dir = str(OUTPUT_ROOT / host / ts)
+    resolved = timestamp or wayback.latest_timestamp(target_url)
+    if not resolved:
+        raise ValueError(f"No Wayback snapshots found for {target_url}")
+    site_dir = str(OUTPUT_ROOT / host / resolved)
     log_path = str(Path(site_dir) / ".log")
-    wb = wayback.build_wayback_url(target_url, timestamp)
+    wb = f"https://web.archive.org/web/{resolved}/{target_url}"
     with connect() as c:
         cur = c.execute(
             """INSERT INTO jobs
                (target_url, timestamp, wayback_url, host, site_dir, log_path,
                 flags_json, status, created_at, schedule_id)
                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)""",
-            (target_url, timestamp, wb, host, site_dir, log_path,
+            (target_url, resolved, wb, host, site_dir, log_path,
              json.dumps(flags), now_iso(), schedule_id),
         )
         return cur.lastrowid
