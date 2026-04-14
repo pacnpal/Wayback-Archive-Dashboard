@@ -26,12 +26,15 @@ async def list_schedules(request: Request):
 async def create(target_url: str = Form(...), cron_expr: str = Form(...)):
     if not croniter.is_valid(cron_expr):
         raise HTTPException(400, "invalid cron expression")
+    t = target_url.strip()
+    if "://" not in t:
+        t = "http://" + t
     nxt = compute_next(cron_expr)
     with jobs.connect() as c:
         c.execute(
             """INSERT INTO schedules (target_url, cron_expr, flags_json, enabled, next_run_at, created_at)
                VALUES (?, ?, '{}', 1, ?, ?)""",
-            (target_url.strip(), cron_expr.strip(), nxt, jobs.now_iso()),
+            (t, cron_expr.strip(), nxt, jobs.now_iso()),
         )
     return RedirectResponse("/schedules", status_code=303)
 

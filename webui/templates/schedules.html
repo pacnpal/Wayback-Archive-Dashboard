@@ -3,7 +3,7 @@
 {% block content %}
 <h2>New schedule</h2>
 <form method="post" action="/schedules">
-  <label>Target URL <input type="url" name="target_url" required></label>
+  <label>Target URL <input type="text" name="target_url" required placeholder="example.com"></label>
   <label>Cron expression <input type="text" name="cron_expr" required placeholder="0 3 * * *"></label>
   <small>Examples: <code>0 3 * * *</code> (daily 03:00), <code>*/15 * * * *</code> (every 15 min), <code>0 0 * * 0</code> (weekly)</small>
   <button type="submit">Create</button>
