@@ -11,6 +11,7 @@ WORKDIR /app
 # Cached apt — the index and .deb archives persist across builds, so unchanged
 # packages don't re-download. `rm -rf /var/lib/apt/lists/*` is skipped because
 # the cache mount is ephemeral in the final image.
+ENV DEBIAN_FRONTEND=noninteractive
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
