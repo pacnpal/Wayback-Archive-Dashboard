@@ -9,6 +9,19 @@ from typing import Optional
 from .link_rewrite import extract_html_refs, extract_css_refs
 
 AUDIT_NAME = ".audit.json"
+UNRECOVERABLE_NAME = ".unrecoverable.json"
+
+
+def _load_unrecoverable(snapshot_dir: Path) -> set[str]:
+    """Paths that a prior repair run exhausted CDX for. Skipped by future
+    repair queues to avoid thrashing the API on known-dead URLs."""
+    p = snapshot_dir / UNRECOVERABLE_NAME
+    if not p.is_file():
+        return set()
+    try:
+        return set(json.loads(p.read_text()))
+    except Exception:
+        return set()
 _HTML_EXTS = {".html", ".htm"}
 _CSS_EXTS = {".css"}
 _SKIP_PREFIX = ("//", "#", "mailto:", "tel:", "javascript:", "data:", "/web/",
@@ -55,7 +68,7 @@ def _resolve(file_rel: str, ref: str) -> Optional[str]:
 
 def audit_snapshot(snapshot_dir: Path) -> dict:
     if not snapshot_dir.is_dir():
-        return {"total_refs": 0, "present": 0, "missing": []}
+        return {"total_refs": 0, "present": 0, "missing": [], "unrecoverable": []}
     missing: dict[str, list[str]] = {}
     total = 0
     present = 0
@@ -79,13 +92,20 @@ def audit_snapshot(snapshot_dir: Path) -> dict:
                 present += 1
             else:
                 missing.setdefault(resolved, []).append(rel_file)
+    unrec = _load_unrecoverable(snapshot_dir)
+    missing_list = []
+    unrecoverable_list = []
+    for k, v in sorted(missing.items()):
+        entry = {"rel": k, "referenced_by": sorted(set(v))[:10]}
+        if k in unrec:
+            unrecoverable_list.append(entry)
+        else:
+            missing_list.append(entry)
     return {
         "total_refs": total,
         "present": present,
-        "missing": [
-            {"rel": k, "referenced_by": sorted(set(v))[:10]}
-            for k, v in sorted(missing.items())
-        ],
+        "missing": missing_list,
+        "unrecoverable": unrecoverable_list,
     }
 
 
@@ -126,7 +146,7 @@ def get_audit(snapshot_dir: Path, force: bool = False) -> dict:
     """Return cached audit for a snapshot; recompute if missing, forced, or
     when the snapshot has been modified since the audit was last written."""
     if not snapshot_dir.is_dir():
-        return {"total_refs": 0, "present": 0, "missing": []}
+        return {"total_refs": 0, "present": 0, "missing": [], "unrecoverable": []}
     p = _audit_path(snapshot_dir)
     if p.is_file() and not force:
         try:

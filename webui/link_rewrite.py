@@ -54,6 +54,53 @@ _COUNTER_RE = re.compile(
 )
 _COUNTER_STUB = "/static/transparent.png"
 
+# Third-party tracking/analytics/ad script src patterns. Stripped at
+# archive time so the viewer doesn't beacon to live surveillance
+# endpoints when a user browses an archived page.
+_TRACKER_SRC_RE = re.compile(
+    r"(google-analytics\.com|googletagmanager\.com|doubleclick\.net"
+    r"|googlesyndication\.com|googletagservices\.com"
+    r"|facebook\.net/[^/]+/sdk\.js|connect\.facebook\.net"
+    r"|stats\.wp\.com|hotjar\.com|matomo\.cloud|piwik\."
+    r"|segment\.(?:com|io)|mixpanel\.com|amplitude\.com"
+    r"|heap\.io|pendo\.io|fullstory\.com|optimizely\.com"
+    r"|newrelic\.com|nr-data\.net|sentry\.io"
+    r"|quantserve\.com|scorecardresearch\.com|chartbeat\.com"
+    r"|addthis\.com|addtoany\.com|sharethis\.com)",
+    re.IGNORECASE,
+)
+
+
+def _strip_trackers_and_referrer(soup) -> int:
+    """Archive-time hardening:
+      * remove <script src> pointing at known tracker/analytics CDNs
+        (idempotent — no-op on pages without them),
+      * prepend <meta name=referrer content=no-referrer> to <head> so
+        outbound link clicks from the viewer don't leak Referer headers
+        to whatever third-party domains the archived page links to.
+    Returns count of modifications.
+    """
+    hits = 0
+    for script in soup.find_all("script", src=True):
+        src = (script.get("src") or "").strip()
+        if _TRACKER_SRC_RE.search(src):
+            script.decompose()
+            hits += 1
+    head = soup.find("head")
+    if head is not None and not head.find(
+            "meta", attrs={"name": "referrer"}):
+        # Insert at the top of head to take precedence over any later
+        # referrer policy meta tags the page might declare.
+        from bs4 import BeautifulSoup as _BS
+        meta = _BS(
+            '<meta name="referrer" content="no-referrer">',
+            "html.parser",
+        ).meta
+        if meta is not None:
+            head.insert(0, meta)
+            hits += 1
+    return hits
+
 
 def _neutralize_forms_and_counters(soup, host: str, ts: str) -> int:
     """In-place rewrite of:
@@ -182,13 +229,41 @@ def _iter_srcset(v: str) -> list[str]:
     return out
 
 
+def _get_base_href(soup) -> str:
+    """Return the first `<base href>` value in the document (stripped), or
+    empty string if none. Used to pre-resolve relative refs in pages that
+    set a `<base>` tag (common in 1990s frameset-era HTML)."""
+    b = soup.find("base", href=True)
+    if b is None:
+        return ""
+    return (b.get("href") or "").strip()
+
+
+def _apply_base(ref: str, base_href: str) -> str:
+    """Resolve `ref` against `base_href` if base is set and ref is relative.
+    Absolute refs (scheme:// or leading /) are returned unchanged."""
+    if not base_href or not ref:
+        return ref
+    if "://" in ref or ref.startswith(("/", "#", "mailto:", "tel:",
+                                        "javascript:", "data:")):
+        return ref
+    from urllib.parse import urljoin
+    # urljoin handles both full-URL bases and relative-path bases.
+    try:
+        return urljoin(base_href, ref)
+    except Exception:
+        return ref
+
+
 def extract_html_refs(html: str) -> list[str]:
     """Return every URL-ish ref in the HTML document, using a parser so that
-    unquoted HTML4 attribute values are handled."""
+    unquoted HTML4 attribute values are handled. Relative refs are pre-
+    resolved against a `<base href>` tag if the page has one."""
     try:
         soup = BeautifulSoup(html, "lxml")
     except Exception:
         soup = BeautifulSoup(html, "html.parser")
+    base_href = _get_base_href(soup)
     refs: list[str] = []
 
     for tag_name, attr, is_srcset in _URL_ATTRS:
@@ -235,6 +310,11 @@ def extract_html_refs(html: str) -> list[str]:
             if _looks_like_url(tok):
                 refs.append(tok)
 
+    # If the page declared a <base href>, pre-resolve every relative ref
+    # against it so downstream consumers (audit, rewriter) see the same URL
+    # a real browser would fetch.
+    if base_href:
+        refs = [_apply_base(r, base_href) for r in refs]
     return refs
 
 
@@ -363,6 +443,16 @@ def rewrite_html(html: str, file_rel_dir: str,
         soup = BeautifulSoup(html, "html.parser")
     hits = 0
 
+    # <base href>: pre-join relative ref values against it before the usual
+    # absolute→relative rewrite. After we've absolutized everything, the
+    # <base> tag itself is redundant — remove it so the browser doesn't
+    # re-apply it at render time against whatever the viewer's URL is.
+    base_href = _get_base_href(soup)
+    if base_href:
+        for base_tag in soup.find_all("base", href=True):
+            base_tag.decompose()
+            hits += 1
+
     for tag_name, attr, is_srcset in _URL_ATTRS:
         selector = [tag_name] if tag_name else True
         for tag in soup.find_all(selector):
@@ -371,13 +461,30 @@ def rewrite_html(html: str, file_rel_dir: str,
             val = tag.get(attr)
             if not isinstance(val, str):
                 continue
+            # Apply <base href> first so a relative ref becomes absolute
+            # before the usual abs→rel pass.
+            if base_href:
+                if is_srcset:
+                    parts = []
+                    for piece in val.split(","):
+                        piece = piece.strip()
+                        if not piece:
+                            continue
+                        bits = piece.split(None, 1)
+                        bits[0] = _apply_base(bits[0], base_href)
+                        parts.append(" ".join(bits))
+                    val = ", ".join(parts)
+                else:
+                    val = _apply_base(val, base_href)
             new, h = _rewrite_attr(val, file_rel_dir, is_srcset)
-            if h:
+            if h or (base_href and val != tag.get(attr)):
                 tag[attr] = new
-                hits += h
+                hits += max(h, 1)
 
     # Rewrite dead search/mail CGI forms and hit-counter images.
     hits += _neutralize_forms_and_counters(soup, host, ts)
+    # Strip live tracker/analytics scripts; add no-referrer policy.
+    hits += _strip_trackers_and_referrer(soup)
 
     # `<img ismap>` server-side imagemaps no longer work (the CGI is dead).
     # If the surrounding anchor points somewhere other than the .map file,

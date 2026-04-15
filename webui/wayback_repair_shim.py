@@ -3,12 +3,16 @@ snapshot. Driven by REPAIR_PATHS env (comma-separated snapshot-relative
 paths). Uses upstream WaybackDownloader's download_file and writes to
 <OUTPUT_DIR>/<rel_path> atomically."""
 from __future__ import annotations
+import json
 import logging
 import os
 import sys
 import tempfile
 import time
 from pathlib import Path
+from urllib.parse import urlparse
+
+from .wayback_resume_shim import _looks_like_html_error, _url_ext
 
 
 def _setup_logger() -> logging.Logger:
@@ -84,6 +88,7 @@ def main() -> int:
     ok = 0
     failed = 0
     fallback_hits = 0
+    unrecoverable: list[str] = []
     t0 = time.monotonic()
     total = len(rel_paths)
     log.info("start host=%s ts=%s paths=%d", host, ts_primary, total)
@@ -106,25 +111,32 @@ def main() -> int:
             log.debug("primary fetch error rel=%s err=%s", rel, e)
 
         # 2) Still missing → ask CDX for other timestamps that have this URL
-        #    with a 200, sorted by proximity, and try each id_ fetch.
+        #    with a 200, sorted by proximity, and try each id_ fetch. Reject
+        #    HTML-masquerade responses (Wayback CGI error pages returned as
+        #    a binary asset's content-type).
         used_ts = ts_primary if content else None
+        ext = _url_ext(orig_url)
+        if content and _looks_like_html_error(content, ext):
+            content = None
         if not content:
             alts = _alt_timestamps(orig_url, ts_primary, limit=30)
             if alts:
                 print(f"         🔍 trying {len(alts)} alt snapshot(s)…", flush=True)
-            for alt in alts[:10]:
+            for alt in alts:
                 data = _download_from_wayback(d.session, alt, orig_url)
-                if data:
-                    content = data
-                    used_ts = alt
-                    fallback_hits += 1
-                    print(f"         ✓ matched alt snapshot {alt}", flush=True)
-                    break
+                if not data or _looks_like_html_error(data, ext):
+                    continue
+                content = data
+                used_ts = alt
+                fallback_hits += 1
+                print(f"         ✓ matched alt snapshot {alt}", flush=True)
+                break
 
         if not content:
-            print("         ⚠️  Failed to download", flush=True)
+            print("         ⚠️  Failed to download (marked unrecoverable)", flush=True)
             log.info("repair rel=%s status=fail", rel)
             failed += 1
+            unrecoverable.append(rel)
             continue
         try:
             _write_atomic(local, content)
@@ -138,10 +150,27 @@ def main() -> int:
             log.warning("write failed rel=%s err=%s", rel, e)
             failed += 1
 
+    # Persist the unrecoverable set so future audits can skip CDX for them.
+    if unrecoverable:
+        unrec_path = Path(out_dir) / ".unrecoverable.json"
+        try:
+            existing: list[str] = []
+            if unrec_path.is_file():
+                try:
+                    existing = json.loads(unrec_path.read_text())
+                except Exception:
+                    existing = []
+            merged = sorted(set(existing) | set(unrecoverable))
+            unrec_path.write_text(json.dumps(merged))
+            log.info("unrecoverable set size=%d written=%s", len(merged), unrec_path)
+        except OSError as e:
+            log.warning("write unrecoverable set failed: %s", e)
+
     dur = time.monotonic() - t0
     print(f"\n{'='*70}\nRepair complete\nFiles successfully downloaded: {ok}\n"
           f"  (of those, {fallback_hits} came from a different snapshot)\n"
-          f"Files failed: {failed}\n{'='*70}\n", flush=True)
+          f"Files failed: {failed}"
+          f" ({len(unrecoverable)} marked unrecoverable)\n{'='*70}\n", flush=True)
     log.info("end ok=%d fallback=%d failed=%d duration=%.1fs",
              ok, fallback_hits, failed, dur)
     return 0 if ok else 2

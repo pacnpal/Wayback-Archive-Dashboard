@@ -81,4 +81,4 @@ def test_resolve_edge_cases():
 def test_audit_empty_dir(make_snapshot, tmp_path):
     # No html/css at all = zero refs.
     r = audit_snapshot(tmp_path)
-    assert r == {"total_refs": 0, "present": 0, "missing": []}
+    assert r == {"total_refs": 0, "present": 0, "missing": [], "unrecoverable": []}

@@ -254,6 +254,43 @@ async def audit_details(request: Request, host: str, ts: str):
     })
 
 
+@router.post("/sites/{host}/recover-missing")
+async def recover_missing(host: str):
+    """Sweep every snapshot; queue a repair job per snapshot with all of its
+    currently-missing refs. The repair shim's widened CDX fallback chases up
+    to 30 alt timestamps per asset and marks persistently-unrecoverable
+    paths so future runs skip them."""
+    host = valid_host(host)
+    host_dir = safe_output_child(host)
+    if not host_dir.is_dir():
+        resp = RedirectResponse(f"/sites/{_qhost(host)}", status_code=303)
+        resp.headers["HX-Trigger"] = "jobs-changed"
+        return resp
+    queued = 0
+    total_paths = 0
+    for snap in host_dir.iterdir():
+        if not snap.is_dir() or not sites_index.is_snapshot_ts(snap.name):
+            continue
+        data = asset_audit.get_audit(snap)
+        rel_paths = [m["rel"] for m in data.get("missing", [])]
+        if not rel_paths:
+            continue
+        jobs.enqueue_repair(host, snap.name, rel_paths)
+        queued += 1
+        total_paths += len(rel_paths)
+    from .. import log as _log
+    _log.get("recover").info(
+        "bulk recover-missing host=%s snapshots=%d paths=%d",
+        host, queued, total_paths,
+    )
+    resp = RedirectResponse(
+        f"/sites/{_qhost(host)}?recover_done=1&snapshots={queued}&paths={total_paths}",
+        status_code=303,
+    )
+    resp.headers["HX-Trigger"] = "jobs-changed"
+    return resp
+
+
 @router.get("/sites/{host}/search", response_class=HTMLResponse)
 async def search(request: Request, host: str, ts: str = "", q: str = ""):
     """TF-IDF full-text search over a snapshot's HTML. Replacement for the

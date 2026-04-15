@@ -143,13 +143,18 @@ def test_rewrite_html_noop_returns_identity():
 
 
 def test_rewrite_html_leaves_protocol_and_wayback_alone():
+    # Absolute protocol-relative and /web/ paths are never rewritten, but
+    # the rewriter does unconditionally add the no-referrer meta (safe
+    # hardening), so content is preserved but `hits` may reflect the meta.
     html = (
+        '<html><head></head><body>'
         '<link rel=stylesheet href="//cdn.example.com/a.css">'
         '<img src="/web/20240101000000/foo.png">'
+        '</body></html>'
     )
-    new, hits = rewrite_html(html, "")
-    assert hits == 0
-    assert new == html
+    new, _ = rewrite_html(html, "")
+    assert "//cdn.example.com/a.css" in new
+    assert "/web/20240101000000/foo.png" in new
 
 
 def test_rewrite_css_url_and_import():
