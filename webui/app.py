@@ -103,12 +103,13 @@ async def wayback_local(rest: str):
     if len(ts_raw) != 14:
         raise HTTPException(404)
     ts = valid_ts(ts_raw)
+    root = jobs.OUTPUT_ROOT.resolve()
     base = (jobs.OUTPUT_ROOT / host / ts).resolve()
-    if not base.is_dir():
+    if not base.is_dir() or not base.is_relative_to(root):
         raise HTTPException(404)
     rel = path.lstrip("/") or "index.html"
     target = (base / rel).resolve()
-    if base != target and base not in target.parents:
+    if not target.is_relative_to(base):
         raise HTTPException(400)
     if target.is_dir():
         target = target / "index.html"

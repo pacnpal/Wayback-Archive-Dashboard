@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 from . import jobs
+from .safe_path import safe_output_child
 
 INDEX_NAME = ".index.json"
 
@@ -22,7 +23,11 @@ def is_snapshot_ts(name: str) -> bool:
 
 
 def _index_path(host: str) -> Path:
-    return jobs.OUTPUT_ROOT / host / INDEX_NAME
+    try:
+        return safe_output_child(host) / INDEX_NAME
+    except ValueError:
+        # Return an unreadable placeholder so downstream .is_file() fails.
+        return jobs.OUTPUT_ROOT / "_invalid_" / INDEX_NAME
 
 
 def _load(host: str) -> dict:
@@ -36,7 +41,10 @@ def _load(host: str) -> dict:
 
 
 def _atomic_write(host: str, data: dict) -> None:
-    d = jobs.OUTPUT_ROOT / host
+    try:
+        d = safe_output_child(host)
+    except ValueError:
+        return
     if not d.is_dir():
         return
     fd, tmp = tempfile.mkstemp(prefix=".index.", dir=str(d))
@@ -80,7 +88,10 @@ def _measure(snapshot_dir: Path) -> dict:
 
 def refresh_index(host: str, timestamps: Optional[list[str]] = None) -> dict:
     """Refresh index entries for `timestamps` (or all snapshots if None)."""
-    host_dir = jobs.OUTPUT_ROOT / host
+    try:
+        host_dir = safe_output_child(host)
+    except ValueError:
+        return {}
     if not host_dir.is_dir():
         return {}
     idx = _load(host)
@@ -106,7 +117,10 @@ def refresh_index(host: str, timestamps: Optional[list[str]] = None) -> dict:
 
 def get_index(host: str) -> dict:
     """Return cached index, lazily refreshing entries whose dir mtime changed."""
-    host_dir = jobs.OUTPUT_ROOT / host
+    try:
+        host_dir = safe_output_child(host)
+    except ValueError:
+        return {}
     if not host_dir.is_dir():
         return {}
     idx = _load(host)

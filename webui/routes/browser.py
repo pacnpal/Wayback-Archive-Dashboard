@@ -20,15 +20,17 @@ MODE_MAP = {".html": "htmlmixed", ".htm": "htmlmixed", ".css": "css",
 
 
 def _host_dir(host: str) -> Path:
+    base = jobs.OUTPUT_ROOT.resolve()
     d = (jobs.OUTPUT_ROOT / host).resolve()
-    if not d.is_dir() or jobs.OUTPUT_ROOT.resolve() not in d.parents and d != jobs.OUTPUT_ROOT.resolve():
+    if not d.is_dir() or not d.is_relative_to(base):
         raise HTTPException(404)
     return d
 
 
 def _safe_path(base: Path, rel: str) -> Path:
+    root = base.resolve()
     p = (base / rel).resolve()
-    if base.resolve() != p and base.resolve() not in p.parents:
+    if not p.is_relative_to(root):
         raise HTTPException(400, "path escape")
     return p
 
@@ -147,7 +149,7 @@ async def sites(request: Request, page: int = 1, per_page: int = 0, host: str = 
 def _delete_snapshot(host: str, ts: str) -> bool:
     base = jobs.OUTPUT_ROOT.resolve()
     target = (jobs.OUTPUT_ROOT / host / ts).resolve()
-    if base not in target.parents or not target.is_dir():
+    if not target.is_relative_to(base) or not target.is_dir():
         return False
     from .. import log as _log
     _log.get("snapshots").info("delete snapshot host=%s ts=%s", host, ts)
@@ -179,7 +181,7 @@ def _delete_host(host: str) -> dict:
     base = jobs.OUTPUT_ROOT.resolve()
     target = (jobs.OUTPUT_ROOT / host).resolve()
     removed_snapshots = 0
-    if base in target.parents and target.is_dir():
+    if target.is_relative_to(base) and target.is_dir():
         removed_snapshots = sum(1 for p in target.iterdir() if p.is_dir())
         shutil.rmtree(target)
     jobs_removed = jobs.delete_jobs_for_host(host)
@@ -248,7 +250,11 @@ async def view(host: str, ts: str, path: str = "index.html"):
     # rewritten relative refs resolve correctly.
     host = valid_host(host)
     ts = valid_ts(ts)
-    return RedirectResponse(f"/sites/{host}/view/{ts}/{path}", status_code=302)
+    from urllib.parse import quote as _urlquote
+    return RedirectResponse(
+        f"/sites/{_urlquote(host, safe='')}/view/{_urlquote(ts, safe='')}/{path}",
+        status_code=302,
+    )
 
 
 @router.get("/sites/{host}/view/{ts}/{path:path}")
@@ -305,4 +311,8 @@ async def edit_post(host: str, ts: str, path: str, content: str = Form(...)):
     if not f.is_file():
         raise HTTPException(404)
     f.write_text(content, encoding="utf-8")
-    return RedirectResponse(f"/sites/{host}/edit?ts={ts}&path={path}", status_code=303)
+    from urllib.parse import quote as _urlquote
+    return RedirectResponse(
+        f"/sites/{_urlquote(host, safe='')}/edit?ts={_urlquote(ts, safe='')}&path={_urlquote(path)}",
+        status_code=303,
+    )

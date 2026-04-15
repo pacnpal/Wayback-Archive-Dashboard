@@ -34,9 +34,9 @@ def _walk(root: Path) -> dict[str, Path]:
 
 
 def _snapshot_root(host: str, ts: str) -> Path:
-    root = (jobs.OUTPUT_ROOT / host / ts).resolve()
     base = jobs.OUTPUT_ROOT.resolve()
-    if base not in root.parents or not root.is_dir():
+    root = (jobs.OUTPUT_ROOT / host / ts).resolve()
+    if not root.is_relative_to(base) or not root.is_dir():
         raise HTTPException(404)
     return root
 
