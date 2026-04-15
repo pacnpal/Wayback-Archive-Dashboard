@@ -257,11 +257,69 @@ async def view(host: str, ts: str, path: str = "index.html"):
     )
 
 
+_IMAGEMAP_FALLBACK_HTML = (
+    "<!DOCTYPE html><html><head><title>Imagemap unavailable</title>"
+    "<style>body{font:14px/1.5 system-ui,sans-serif;max-width:40em;margin:3em auto;padding:0 1em;color:#444}"
+    "h1{font-size:1.2em;margin:0 0 .5em} a{color:#2563eb}</style>"
+    "</head><body><h1>Imagemap not available in this capture</h1>"
+    "<p>The server-side imagemap file for this 1990s-era page was never captured "
+    "as plain text — Wayback only has the CGI's HTML error page. Click coordinates "
+    "cannot be resolved.</p>"
+    "<p><a href=\"javascript:history.back()\">← back</a></p></body></html>"
+)
+
+
 @router.get("/sites/{host}/view/{ts}/{path:path}")
 async def view_path(request: Request, host: str, ts: str, path: str = ""):
     host = valid_host(host)
     ts = valid_ts(ts)
     base = _host_dir(host) / ts
+
+    # Intercept server-side imagemap clicks: `<img ismap>` sends coords as a
+    # bare `?x,y` query. Parse the on-disk .map and 302 to the matching shape.
+    if path.endswith(".map") and request.url.query:
+        from .. import imagemap
+        coords = imagemap.parse_query_coords(request.url.query)
+        if coords:
+            f = _safe_path(base, path)
+            if f.is_file():
+                try:
+                    body = f.read_bytes()
+                except OSError:
+                    body = b""
+                if imagemap.is_plausible_map_text(body):
+                    try:
+                        shapes = imagemap.parse_map(body.decode("utf-8", errors="replace"))
+                        target = imagemap.resolve(shapes, *coords)
+                    except Exception:
+                        target = None
+                    if target:
+                        from urllib.parse import urlparse as _up
+                        from posixpath import relpath as _relpath
+                        p = _up(target)
+                        # Rewrite to local viewer when the shape's URL points
+                        # at the same host.
+                        if (not p.scheme or not p.netloc or
+                                p.netloc.lstrip("www.") == host.lstrip("www.")):
+                            tpath = (p.path or "/").lstrip("/")
+                            # Relative to the snapshot root; the viewer route is
+                            # /sites/{host}/view/{ts}/<tpath>.
+                            local_url = (
+                                f"/sites/{host}/view/{ts}/"
+                                f"{tpath or 'index.html'}"
+                            )
+                            if p.query:
+                                local_url += f"?{p.query}"
+                            if p.fragment:
+                                local_url += f"#{p.fragment}"
+                            return RedirectResponse(local_url, status_code=302)
+                        # Off-host shape — let the browser handle it.
+                        return RedirectResponse(target, status_code=302)
+                    # Map parsed but no matching shape → 404.
+                    raise HTTPException(404)
+                # HTML-error masquerade → friendly fallback page.
+                return HTMLResponse(_IMAGEMAP_FALLBACK_HTML, status_code=200)
+
     f = _safe_path(base, path or "index.html")
     if f.is_dir():
         f = f / "index.html"

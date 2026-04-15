@@ -280,6 +280,53 @@ async def archive_one(host: str, request: Request):
     return resp
 
 
+@router.post("/sites/{host}/recover-imagemaps")
+async def recover_imagemaps(host: str):
+    """Sweep every `.map` under the host, and for any that currently hold
+    Wayback's HTML error page, consult CDX for an alt-timestamp capture
+    whose body is real NCSA map text. Silently skips files whose local
+    copy already parses as plausible map text."""
+    host = valid_host(host)
+    host_dir = safe_output_child(host)
+    if not host_dir.is_dir():
+        resp = RedirectResponse(f"/sites/{_qhost(host)}", status_code=303)
+        resp.headers["HX-Trigger"] = "jobs-changed"
+        return resp
+    from .. import imagemap
+    recovered = 0
+    attempted = 0
+    for map_path in host_dir.rglob("*.map"):
+        if not map_path.is_file():
+            continue
+        try:
+            body = map_path.read_bytes()
+        except OSError:
+            continue
+        if imagemap.is_plausible_map_text(body):
+            continue  # already good, skip CDX
+        attempted += 1
+        # Derive ts from snapshot-folder name (path structure: host/ts/…).
+        try:
+            ts = map_path.relative_to(host_dir).parts[0]
+        except Exception:
+            continue
+        result = imagemap.recover_map(map_path, host, ts)
+        if result is not None:
+            recovered += 1
+    from .. import log as _log
+    _log.get("imagemap").info(
+        "imagemap recovery host=%s attempted=%d recovered=%d",
+        host, attempted, recovered,
+    )
+    resp = RedirectResponse(
+        f"/sites/{_qhost(host)}?imagemaps_done=1"
+        f"&attempted={attempted}&recovered={recovered}",
+        status_code=303,
+    )
+    resp.headers["HX-Trigger"] = "jobs-changed"
+    return resp
+
+
 @router.post("/sites/cleanup-orphans")
 async def cleanup_all_orphans():
     """Quarantine stray files/dirs at OUTPUT_ROOT and under each host dir into

@@ -160,6 +160,31 @@ def test_rewrite_css_url_and_import():
     assert "../../img/p.png" in new
 
 
+def test_rewrite_html_strips_ismap_when_anchor_has_fallback():
+    # <img ismap> wrapped in <a href="/products"> — the anchor is a
+    # strictly better click target than the dead imagemap CGI.
+    html = '<a href="/products"><img src="nav.gif" ismap></a>'
+    new, _ = rewrite_html(html, "")
+    assert "ismap" not in new.lower()
+    # The rewriter also converts absolute→relative for viewing locally,
+    # so the bare path appears without a leading slash.
+    assert "products" in new
+
+
+def test_rewrite_html_keeps_ismap_when_anchor_points_to_map():
+    # If the anchor IS the .map itself, removing ismap would break the
+    # one working click path. Leave it alone.
+    html = '<a href="/nav.map"><img src="nav.gif" ismap></a>'
+    new, _ = rewrite_html(html, "")
+    assert "ismap" in new.lower()
+
+
+def test_rewrite_html_keeps_ismap_with_no_anchor():
+    html = '<img src="x.gif" ismap>'
+    new, _ = rewrite_html(html, "")
+    assert "ismap" in new.lower()
+
+
 def test_rewrite_html_srcset_preserves_descriptors():
     html = '<source srcset="/a.png 1x, /b.png 2x">'
     new, hits = rewrite_html(html, "sub")

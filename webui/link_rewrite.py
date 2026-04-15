@@ -275,6 +275,27 @@ def rewrite_html(html: str, file_rel_dir: str) -> tuple[str, int]:
                 tag[attr] = new
                 hits += h
 
+    # `<img ismap>` server-side imagemaps no longer work (the CGI is dead).
+    # If the surrounding anchor points somewhere other than the .map file,
+    # drop the ismap attribute so the browser honors the anchor's href instead
+    # of POSTing click coordinates to a dead endpoint.
+    for img in soup.find_all("img"):
+        if not img.has_attr("ismap"):
+            continue
+        a = img.find_parent("a")
+        if a is None:
+            continue
+        href = (a.get("href") or "").strip()
+        if not href:
+            continue
+        # If the anchor points at the same .map file the img is using for
+        # coordinates, removing ismap would break the only click path — leave
+        # it in place.
+        if href.lower().endswith(".map") or ".map?" in href.lower():
+            continue
+        del img["ismap"]
+        hits += 1
+
     # inline styles
     for tag in soup.find_all(style=True):
         style = tag.get("style") or ""
