@@ -228,8 +228,8 @@ async def audit_snapshots(host: str, ts: str = ""):
     host_dir = safe_output_child(host)
     if not host_dir.is_dir():
         resp = RedirectResponse(f"/sites/{_qhost(host)}", status_code=303)
-    resp.headers["HX-Trigger"] = "jobs-changed"
-    return resp
+        resp.headers["HX-Trigger"] = "jobs-changed"
+        return resp
     targets = [ts] if ts else [
         p.name for p in host_dir.iterdir()
         if p.is_dir() and sites_index.is_snapshot_ts(p.name)
