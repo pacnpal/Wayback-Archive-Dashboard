@@ -59,6 +59,11 @@ _BINARY_EXTS = {
     ".webm", ".avi", ".mkv", ".flv", ".woff", ".woff2", ".ttf", ".otf",
     ".eot", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pps", ".pptx",
     ".css", ".js", ".json", ".xml", ".rss", ".atom",
+    # Server-side imagemap definitions (NCSA/CERN format, 1993–late-1990s).
+    # The live .map file was a plain-text lookup table consumed by an
+    # `imagemap` CGI; Wayback no longer runs that CGI, so requests hit an
+    # HTML error page that we must not mistake for the real map.
+    ".map",
 }
 
 _HTML_SNIFF = re.compile(rb"^\s*(<!doctype\s+html|<html[\s>]|<head[\s>]|<!--\s*saved|<\?xml[^>]*>\s*<html)", re.IGNORECASE)
