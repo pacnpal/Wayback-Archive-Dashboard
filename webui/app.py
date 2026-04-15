@@ -1,11 +1,18 @@
 """FastAPI app entrypoint."""
 from __future__ import annotations
 import asyncio
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+
+# Version is baked in at Docker-build time via ARG APP_VERSION in the
+# Dockerfile (release workflow passes github.ref_name). Falls back to "dev"
+# for local/ad-hoc runs.
+APP_VERSION = os.environ.get("APP_VERSION", "dev")
+GITHUB_URL = "https://github.com/pacnpal/Wayback-Archive-Dashboard"
 
 import asyncio as _asyncio
 import json as _json
@@ -70,6 +77,8 @@ async def _progress_logger(stop: _asyncio.Event) -> None:
 
 
 app = FastAPI(title="Wayback Archive Dashboard", lifespan=lifespan)
+app.state.version = APP_VERSION
+app.state.github_url = GITHUB_URL
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 app.mount("/archives", StaticFiles(directory=jobs.OUTPUT_ROOT, html=True), name="archives")
 
