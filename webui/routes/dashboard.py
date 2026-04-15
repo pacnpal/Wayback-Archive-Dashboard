@@ -56,10 +56,12 @@ RADIO_FLAGS = {flag for _, _, _, opts in RADIO_GROUPS for flag, _, _, _ in opts 
 # Integer-valued flags rendered as <input type=number> instead of a checkbox.
 # Schema: (key, label, help, min, max, default_blank)
 NUMBER_FLAGS = [
-    ("FETCH_WORKERS", "Parallel asset prefetch",
-     "How many background threads speculatively fetch the next few URLs. "
-     "1 (default) keeps the current sequential behavior; higher values amortize "
-     "network RTT at the cost of Wayback rate-limit pressure.",
+    ("FETCH_WORKERS", "Per-job: asset prefetch threads",
+     "How many background threads speculatively fetch the next few asset URLs "
+     "within THIS job (1 = sequential, default). Stacks with the global "
+     "\"Jobs in parallel\" setting at the top of the page — e.g. 3 jobs × 4 "
+     "prefetch threads = up to 12 concurrent Wayback requests. Higher values "
+     "trade rate-limit pressure for lower wall-clock.",
      1, 16, ""),
 ]
 

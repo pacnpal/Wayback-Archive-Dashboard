@@ -1,6 +1,20 @@
 {% extends "base.html" %}
 {% block title %}Dashboard{% endblock %}
 {% block content %}
+<fieldset class="opt-group" style="margin-bottom:1rem">
+  <legend>Global: jobs in parallel</legend>
+  <label class="opt" style="display:flex;gap:.5rem;align-items:center;margin:0">
+    <input type="number" id="top-parallel" min="1" max="20" value="{{ max_concurrent }}" style="width:5rem">
+    <button type="button" class="secondary" style="padding:.2rem .6rem"
+            onclick="saveConcurrency(this,'top-parallel','top-parallel-msg')">Save</button>
+    <small id="top-parallel-msg" style="color:var(--pico-muted-color)"></small>
+    <small class="opt-help" style="margin-left:auto">
+      How many whole jobs (snapshots) run at once (1–20). Global setting — picks up for new jobs immediately.
+      Distinct from the per-job "asset prefetch threads" flag in the Options block below.
+    </small>
+  </label>
+</fieldset>
+
 <h2>New archive job</h2>
 <form method="post" action="/jobs">
   <label>Target URL
@@ -92,26 +106,18 @@
         <label class="opt"><span class="opt-label">To year</span><input type="number" name="to_year" min="1996" max="2099" placeholder="any"></label>
         <label class="opt"><span class="opt-label">Max jobs</span><input type="number" name="max_count" min="1" max="500" value="50"></label>
       </fieldset>
-      <fieldset class="opt-group">
-        <legend>Concurrency</legend>
-        <label class="opt">
-          <span class="opt-label">Parallel downloads</span>
-          <input type="number" id="bulk-parallel" min="1" max="20" value="{{ max_concurrent }}">
-          <small class="opt-help">How many jobs run at once (1–20). Saved globally; new jobs pick it up immediately.</small>
-        </label>
-        <button type="button" class="secondary" style="padding:.2rem .6rem"
-                onclick="saveConcurrency(this)">Save</button>
-        <small id="bulk-parallel-msg" style="margin-left:.5rem"></small>
-      </fieldset>
     </div>
+    <small class="opt-help" style="display:block;margin-top:.5rem">
+      Jobs-in-parallel setting lives at the top of the page.
+    </small>
     <script>
-    async function saveConcurrency(btn) {
-      const v = document.getElementById('bulk-parallel').value;
-      const msg = document.getElementById('bulk-parallel-msg');
+    async function saveConcurrency(btn, inputId, msgId) {
+      const v = document.getElementById(inputId).value;
+      const msg = document.getElementById(msgId);
       btn.disabled = true; msg.textContent = 'saving…';
       try {
         const fd = new FormData(); fd.append('max_concurrent', v);
-        const r = await fetch('/settings/max-concurrent', {method:'POST', body: fd, redirect: 'manual'});
+        await fetch('/settings/max-concurrent', {method:'POST', body: fd, redirect: 'manual'});
         msg.textContent = '✓ saved';
       } catch(e) { msg.textContent = 'error: ' + e; }
       finally { btn.disabled = false; setTimeout(()=>msg.textContent='', 2000); }
