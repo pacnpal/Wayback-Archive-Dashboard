@@ -151,17 +151,6 @@ async def site_detail(request: Request, host: str,
             by_day[f"{ts[0:4]}-{ts[4:6]}-{ts[6:8]}"].append(s)
         days_sorted = sorted(by_day.keys(), reverse=True)
 
-    audit_map = {}
-    for ts, _meta in rows_page:
-        try:
-            a = asset_audit.get_audit(safe_output_child(host, ts))
-            refs_total = a["total_refs"]
-            missing_n = len(a["missing"])
-            pct = 100 if refs_total == 0 else int((refs_total - missing_n) * 100 / refs_total)
-            audit_map[ts] = {"total": refs_total, "missing": missing_n, "percent": pct}
-        except Exception:
-            audit_map[ts] = None
-
     resp = templates.TemplateResponse(request, "site_detail.html", {
         "request": request,
         "host": host,
@@ -176,7 +165,6 @@ async def site_detail(request: Request, host: str,
         "days_sorted": days_sorted,
         "from_year": from_year,
         "to_year": to_year,
-        "audit_map": audit_map,
     })
     if explicit:
         resp.set_cookie("sort_site_detail", f"{sort}:{dir}",
@@ -252,6 +240,42 @@ async def audit_details(request: Request, host: str, ts: str):
         "total": data["total_refs"], "present": data["present"],
         "missing": data["missing"],
     })
+
+
+@router.get("/sites/{host}/audit-cell", response_class=HTMLResponse)
+async def audit_cell(host: str, ts: str):
+    """Tiny HTML fragment for the per-snapshot health cell. site_detail.html
+    fetches one of these per row via htmx so the page paints before any
+    audit walks complete. Skips the walk entirely while a job is actively
+    crawling the snapshot (its mtime moves constantly, invalidating cache)."""
+    host = valid_host(host)
+    ts = valid_ts(ts)
+    with jobs.connect() as c:
+        in_flight = c.execute(
+            "SELECT 1 FROM jobs WHERE host=? AND timestamp=? "
+            "AND status IN ('pending','running') LIMIT 1",
+            (host, ts),
+        ).fetchone()
+    if in_flight:
+        return HTMLResponse(
+            '<span class="audit-pending" title="Job running — audit will rebuild after it completes">…</span>'
+        )
+    snap = safe_output_child(host, ts)
+    if not snap.is_dir():
+        return HTMLResponse('<span title="Snapshot dir missing">—</span>')
+    a = asset_audit.get_audit(snap)
+    refs = a["total_refs"]
+    missing = len(a["missing"])
+    if refs == 0:
+        return HTMLResponse("—")
+    if missing == 0:
+        return HTMLResponse('<span class="status-ok">100%</span>')
+    pct = int((refs - missing) * 100 / refs)
+    return HTMLResponse(
+        f'<a href="/sites/{_qhost(host)}/audit/{ts}" '
+        f'title="{refs} refs, {missing} missing">'
+        f'{pct}% ({missing} missing)</a>'
+    )
 
 
 @router.post("/sites/{host}/recover-missing")

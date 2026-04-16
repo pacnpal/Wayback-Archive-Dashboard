@@ -152,17 +152,10 @@
         <td class="mono" style="text-align:right">{{ lh.size_human(meta.size_bytes) }}</td>
         <td class="mono" style="text-align:right">{{ meta.file_count if meta.file_count is not none else '—' }}</td>
         <td class="mono ts-cell">{% if meta.mtime %}{{ meta.mtime[0:10] }}<br>{{ meta.mtime[11:19] }}{% else %}—{% endif %}</td>
-        {% set a = audit_map.get(ts) %}
-        <td class="mono" style="font-size:.8rem">
-          {% if a is none or a.total == 0 %}
-            —
-          {% elif a.missing == 0 %}
-            <span class="status-ok">100%</span>
-          {% else %}
-            <a href="/sites/{{host}}/audit/{{ts}}" title="click for details">
-              {{ a.percent }}% ({{ a.missing }} missing)
-            </a>
-          {% endif %}
+        <td class="mono audit-cell" style="font-size:.8rem"
+            hx-get="/sites/{{host}}/audit-cell?ts={{ts}}"
+            hx-trigger="load" hx-swap="innerHTML">
+          <span class="audit-loading" title="Computing audit…">…</span>
         </td>
         <td>
           <a href="/sites/{{host}}/view?ts={{ts}}">view</a>
@@ -173,14 +166,13 @@
             <input type="hidden" name="ts" value="{{ts}}">
             <button type="submit" class="secondary" style="padding:.1rem .4rem;font-size:.8rem">fix links</button>
           </form>
-          {% if a and a.missing > 0 %}
           &middot;
           <form method="post" action="/sites/{{host}}/repair" style="display:inline"
-                onsubmit="return confirm('Re-fetch {{a.missing}} missing asset(s) for this snapshot?');">
+                onsubmit="return confirm('Re-fetch every currently-missing asset for this snapshot?');">
             <input type="hidden" name="ts" value="{{ts}}">
-            <button type="submit" class="secondary" style="padding:.1rem .4rem;font-size:.8rem">repair</button>
+            <button type="submit" class="secondary" style="padding:.1rem .4rem;font-size:.8rem"
+                    title="No-op if the audit shows no missing files">repair</button>
           </form>
-          {% endif %}
         </td>
       </tr>
       {% endfor %}
