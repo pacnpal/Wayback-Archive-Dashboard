@@ -48,6 +48,10 @@ def _setup_logger() -> logging.Logger:
 
 log = _setup_logger()
 _cache_hits = 0
+_prefetch_hits = 0
+_net_calls = 0
+_net_ms_sum = 0.0
+_net_ms_max = 0.0
 
 
 # --- corruption sniffing ----------------------------------------------------
@@ -172,7 +176,16 @@ def _patch() -> None:
             return None
         except Exception:
             pass
-        return _orig_download_file(self, url)
+        global _net_calls, _net_ms_sum, _net_ms_max
+        t0 = time.monotonic()
+        try:
+            return _orig_download_file(self, url)
+        finally:
+            dt = (time.monotonic() - t0) * 1000.0
+            _net_calls += 1
+            _net_ms_sum += dt
+            if dt > _net_ms_max:
+                _net_ms_max = dt
 
     d.WaybackDownloader._get_local_path = safe_get_local_path
     d.WaybackDownloader.download_file = cached_download_file
@@ -314,6 +327,65 @@ def _patch_redirect_stubs() -> None:
     d.WaybackDownloader.__init__ = wrapped_init
 
 
+# --- session retry + pool tuning --------------------------------------------
+
+def _patch_session_retries() -> None:
+    """Install an HTTPAdapter on the downloader's `requests.Session` that:
+
+      * Retries 429/502/503/504 with exponential backoff, respecting any
+        Retry-After header Wayback sends back. Upstream's bare session gave
+        up on the first throttle response and let a single transient error
+        kick an asset into the expensive 30-alt-timestamp CDX fallback.
+      * Raises `pool_maxsize` to 32 so the prefetch ThreadPoolExecutor
+        doesn't serialize on urllib3's default 10-connection pool when
+        FETCH_WORKERS is cranked up.
+    """
+    try:
+        from requests.adapters import HTTPAdapter
+        from urllib3.util.retry import Retry
+    except ImportError:
+        log.info("requests/urllib3 not importable; skipping session retry patch")
+        return
+
+    try:
+        retry = Retry(
+            total=4,
+            backoff_factor=0.8,
+            status_forcelist=(429, 502, 503, 504),
+            allowed_methods=frozenset(["GET", "HEAD"]),
+            respect_retry_after_header=True,
+            raise_on_status=False,
+        )
+    except TypeError:
+        # urllib3 < 1.26 uses method_whitelist. Fall back silently.
+        retry = Retry(
+            total=4,
+            backoff_factor=0.8,
+            status_forcelist=(429, 502, 503, 504),
+            raise_on_status=False,
+        )
+
+    from wayback_archive import downloader as d
+    _orig_init = d.WaybackDownloader.__init__
+
+    def _install_adapter(self):
+        sess = getattr(self, "session", None)
+        if sess is None or getattr(sess, "_retry_mounted", False):
+            return
+        adapter = HTTPAdapter(
+            pool_connections=32, pool_maxsize=32, max_retries=retry,
+        )
+        sess.mount("https://", adapter)
+        sess.mount("http://", adapter)
+        sess._retry_mounted = True
+
+    def wrapped_init(self, *a, **kw):
+        _orig_init(self, *a, **kw)
+        _install_adapter(self)
+
+    d.WaybackDownloader.__init__ = wrapped_init
+
+
 # --- supplementary URL extractor ---------------------------------------------
 
 def _patch_process_html() -> None:
@@ -378,10 +450,12 @@ def _patch_process_html() -> None:
             log.debug("supplementary refs base=%s added=%d", base_url, added)
         # If a prefetch pool is running, seed it with everything we now have
         # queued (both upstream's native links and our supplementary ones).
+        # Cap at 500 so the in-memory placeholder dict stays bounded on
+        # pathological pages; the executor's own queue absorbs the rest.
         seed = getattr(self, "_prefetch_seed", None)
         if seed is not None and links_to_follow:
             try:
-                seed(self, list(links_to_follow)[:_PREFETCH_WORKERS * 2])
+                seed(self, list(links_to_follow)[:500])
             except Exception:
                 pass
         return processed_html, links_to_follow
@@ -462,9 +536,9 @@ def _patch_prefetch() -> None:
     """
     global _PREFETCH_WORKERS, _prefetch_pool, _prefetch_lock
     try:
-        _PREFETCH_WORKERS = max(1, int(os.environ.get("FETCH_WORKERS", "1")))
+        _PREFETCH_WORKERS = max(1, int(os.environ.get("FETCH_WORKERS", "4")))
     except ValueError:
-        _PREFETCH_WORKERS = 1
+        _PREFETCH_WORKERS = 4
     if _PREFETCH_WORKERS <= 1:
         return
 
@@ -493,6 +567,8 @@ def _patch_prefetch() -> None:
             hit = _prefetch_cache.pop(url, "MISS")
         if hit != "MISS":
             if hit is not None:
+                global _prefetch_hits
+                _prefetch_hits += 1
                 log.debug("prefetch hit %s", url)
                 return hit
         return _inner_download(self, url)
@@ -591,6 +667,7 @@ def _patch_playwright() -> None:
 
 def main() -> None:
     _patch()
+    _patch_session_retries()
     _patch_prefetch()
     _patch_process_html()
     _patch_redirect_stubs()
@@ -603,8 +680,13 @@ def main() -> None:
     try:
         cli_main()
     finally:
-        log.info("shim end cache_hits=%d duration=%.1fs",
-                 _cache_hits, time.monotonic() - t0)
+        avg_ms = (_net_ms_sum / _net_calls) if _net_calls else 0.0
+        log.info(
+            "shim end duration=%.1fs cache_hits=%d prefetch_hits=%d "
+            "net_calls=%d net_avg_ms=%.0f net_max_ms=%.0f",
+            time.monotonic() - t0, _cache_hits, _prefetch_hits,
+            _net_calls, avg_ms, _net_ms_max,
+        )
 
 
 if __name__ == "__main__":
