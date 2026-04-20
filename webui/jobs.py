@@ -8,7 +8,7 @@ import signal
 import sqlite3
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -105,6 +105,15 @@ def init_db() -> None:
             c.execute("ALTER TABLE jobs ADD COLUMN repair_paths_json TEXT")
         except sqlite3.OperationalError:
             pass
+        # Outage-aware deferral columns — added 2026-04.
+        for ddl in (
+            "ALTER TABLE jobs ADD COLUMN not_before TEXT",
+            "ALTER TABLE jobs ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0",
+        ):
+            try:
+                c.execute(ddl)
+            except sqlite3.OperationalError:
+                pass
         # Recover orphans: jobs that were mid-run when the container stopped
         # go back to pending so the worker picks them up again on startup.
         orphans = [r[0] for r in c.execute(
@@ -319,6 +328,65 @@ def cancel_many(ids: list[int]) -> int:
     return cancelled + r
 
 
+def pick_ready_pending(limit: int) -> list[sqlite3.Row]:
+    """Pending jobs whose ``not_before`` has elapsed (or is NULL).
+    Encapsulates the worker's SELECT so the outage gate and tests share
+    the same filter."""
+    now = now_iso()
+    with connect() as c:
+        return c.execute(
+            "SELECT * FROM jobs "
+            "WHERE status='pending' "
+            "AND (not_before IS NULL OR not_before <= ?) "
+            "ORDER BY id ASC LIMIT ?",
+            (now, limit),
+        ).fetchall()
+
+
+def defer_for_outage(job_id: int, now: Optional[datetime] = None) -> None:
+    """Reschedule a job that failed during a wayback outage: status back
+    to pending, attempts++, not_before = now + backoff(old_attempts)."""
+    from . import wayback_probe
+    now = now or datetime.now(timezone.utc)
+    with connect() as c:
+        row = c.execute("SELECT attempts FROM jobs WHERE id=?", (job_id,)).fetchone()
+        old_attempts = int(row["attempts"] or 0) if row else 0
+        delay_s = wayback_probe.backoff_seconds(old_attempts)
+        nb = (now + timedelta(seconds=delay_s)).replace(microsecond=0).isoformat()
+        c.execute(
+            "UPDATE jobs SET status='pending', started_at=NULL, finished_at=NULL, "
+            "attempts=?, not_before=? WHERE id=?",
+            (old_attempts + 1, nb, job_id),
+        )
+    logger.info("defer job=%d attempts=%d not_before=%s", job_id, old_attempts + 1, nb)
+    events_bus.publish("jobs-changed")
+
+
+def earliest_deferred_not_before() -> Optional[str]:
+    """ISO timestamp of the soonest upcoming deferred-job retry, or None
+    if no pending jobs have a ``not_before`` set."""
+    with connect() as c:
+        row = c.execute(
+            "SELECT MIN(not_before) AS nb FROM jobs "
+            "WHERE status='pending' AND not_before IS NOT NULL"
+        ).fetchone()
+    return row["nb"] if row and row["nb"] else None
+
+
+def release_deferred() -> int:
+    """Clear ``not_before`` on all pending jobs — called when the probe
+    flips back to up so queued work drains in one pass."""
+    with connect() as c:
+        n = c.execute(
+            "UPDATE jobs SET not_before=NULL "
+            "WHERE status='pending' AND not_before IS NOT NULL"
+        ).rowcount
+    if n:
+        logger.info("released %d deferred jobs", n)
+        events_bus.publish("jobs-changed")
+    return n
+
+
 def cancel_all_pending() -> int:
     with connect() as c:
         ids = [r[0] for r in c.execute("SELECT id FROM jobs WHERE status='pending'").fetchall()]
@@ -465,6 +533,22 @@ async def _run_one(job: sqlite3.Row) -> None:
             except Exception as e:
                 logger.warning("auto-audit/repair failed job=%d err=%s",
                                job["id"], e)
+    # If the job failed and the probe says CDX is down, this is almost
+    # certainly an outage, not a real content failure. Defer instead of
+    # going terminal; release_deferred() or the elapsed not_before will
+    # retry us when IA comes back.
+    if status == "error":
+        try:
+            from . import wayback_probe
+            if not wayback_probe.is_wayback_up():
+                defer_for_outage(job["id"])
+                dur = time.monotonic() - start_time
+                logger.info("deferred job=%d duration=%.1fs rc=%s (wayback down)",
+                            job["id"], dur, rc)
+                events_bus.publish("jobs-changed")
+                return
+        except Exception as e:
+            logger.warning("defer check failed job=%d err=%s", job["id"], e)
     with connect() as c:
         c.execute(
             "UPDATE jobs SET status=?, finished_at=? WHERE id=?",
@@ -516,6 +600,7 @@ async def _run_job(row):
 
 
 async def worker_loop(stop: asyncio.Event) -> None:
+    from . import wayback_probe
     active: set[asyncio.Task] = set()
     while not stop.is_set():
         limit = get_max_concurrent()
@@ -531,11 +616,18 @@ async def worker_loop(stop: asyncio.Event) -> None:
             except ValueError:
                 await asyncio.sleep(1)
             continue
-        with connect() as c:
-            rows = c.execute(
-                "SELECT * FROM jobs WHERE status='pending' ORDER BY id ASC LIMIT ?",
-                (headroom,),
-            ).fetchall()
+        # Outage gate: if the probe says CDX is down, don't pop new jobs.
+        # In-flight jobs continue so they can finish/fail on their own.
+        if not wayback_probe.is_wayback_up():
+            try:
+                if active:
+                    await asyncio.wait(active, timeout=5.0, return_when=asyncio.FIRST_COMPLETED)
+                else:
+                    await asyncio.wait_for(stop.wait(), timeout=5.0)
+            except asyncio.TimeoutError:
+                pass
+            continue
+        rows = pick_ready_pending(headroom)
         if not rows:
             try:
                 if active:
