@@ -47,3 +47,18 @@ def test_publish_with_no_subscribers_is_noop():
     bus = _fresh_bus()
     bus.publish("whatever")
     # No assertion needed — reaching here without error is the test.
+
+
+def test_unsubscribe_last_resets_owner_loop():
+    """When every SSE client disconnects, the captured owner loop must
+    clear so the next subscribe() — which may come from a fresh loop in
+    tests or a reloaded worker — captures the right one."""
+    bus = _fresh_bus()
+
+    async def first():
+        q = bus.subscribe()
+        assert bus._owner_loop is not None
+        bus.unsubscribe(q)
+        assert bus._owner_loop is None
+
+    asyncio.run(first())

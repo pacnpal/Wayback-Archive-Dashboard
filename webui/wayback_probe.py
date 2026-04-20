@@ -196,18 +196,26 @@ def run_probe_and_update() -> dict:
 
 
 def get_status() -> dict:
-    """Snapshot for the UI / logs."""
+    """Snapshot for the UI / logs. Reads both settings keys in a single
+    SQLite connection so a concurrent ``save_state()`` commit can't
+    tear the snapshot across two reads."""
     from . import jobs
-    s = load_state()
     with jobs.connect() as c:
-        row = c.execute(
-            "SELECT value FROM settings WHERE key='wayback_state_since'"
-        ).fetchone()
+        rows = {
+            r["key"]: r["value"] for r in c.execute(
+                "SELECT key,value FROM settings "
+                "WHERE key IN ('wayback_probe_state','wayback_state_since')"
+            ).fetchall()
+        }
+    try:
+        data = json.loads(rows.get("wayback_probe_state") or "{}")
+    except (TypeError, json.JSONDecodeError):
+        data = {}
     return {
-        "state": s.state,
-        "since": row["value"] if row else None,
-        "consecutive_fails": s.consecutive_fails,
-        "consecutive_ok": s.consecutive_ok,
+        "state": data.get("state", "unknown"),
+        "since": rows.get("wayback_state_since"),
+        "consecutive_fails": int(data.get("consecutive_fails", 0)),
+        "consecutive_ok": int(data.get("consecutive_ok", 0)),
     }
 
 

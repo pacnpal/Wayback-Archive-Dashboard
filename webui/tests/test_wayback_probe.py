@@ -80,6 +80,27 @@ def test_probe_once_returns_false_on_timeout(monkeypatch):
     assert wayback_probe.probe_once() is False
 
 
+def test_get_status_reads_both_settings_in_one_connection(tmp_path, monkeypatch):
+    """Regression: get_status() used to load state via one connection
+    then read state_since via another, so a concurrent save_state()
+    commit between them could produce a mixed snapshot. Now both keys
+    come from a single SELECT."""
+    monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+    import importlib
+    import webui.jobs as j
+    importlib.reload(j)
+    j.init_db()
+    import webui.wayback_probe as wp
+    importlib.reload(wp)
+    wp.save_state(wp.ProbeState(state="down", consecutive_fails=4, consecutive_ok=0),
+                  since_iso="2026-04-20T12:00:00+00:00")
+    snap = wp.get_status()
+    assert snap["state"] == "down"
+    assert snap["since"] == "2026-04-20T12:00:00+00:00"
+    assert snap["consecutive_fails"] == 4
+    assert snap["consecutive_ok"] == 0
+
+
 def test_probe_once_fails_closed_when_status_is_missing(monkeypatch):
     """A health check must never default to 'up' on a malformed response
     object. Regression for the previous `getattr(r, 'status', 200)` that

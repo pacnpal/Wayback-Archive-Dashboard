@@ -12,6 +12,7 @@ stay on the fast path.
 """
 from __future__ import annotations
 import asyncio
+import threading
 
 _subscribers: set[asyncio.Queue] = set()
 _MAX_QUEUE = 64
@@ -20,22 +21,35 @@ _MAX_QUEUE = 64
 # when called from a non-loop thread. Worker processes / tests that
 # never subscribe leave this None and publish becomes a no-op.
 _owner_loop: "asyncio.AbstractEventLoop | None" = None
+# Guards _subscribers and _owner_loop. The GIL would prevent crashes on
+# its own, but we now have cross-thread publishes (manual retry via
+# asyncio.to_thread), so an explicit lock makes the thread contract
+# visible and future-proofs against free-threaded CPython.
+_registry_lock = threading.Lock()
 
 
 def subscribe() -> asyncio.Queue:
     global _owner_loop
-    if _owner_loop is None:
-        try:
-            _owner_loop = asyncio.get_running_loop()
-        except RuntimeError:
-            _owner_loop = None
     q: asyncio.Queue = asyncio.Queue(maxsize=_MAX_QUEUE)
-    _subscribers.add(q)
+    with _registry_lock:
+        if _owner_loop is None:
+            try:
+                _owner_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                _owner_loop = None
+        _subscribers.add(q)
     return q
 
 
 def unsubscribe(q: asyncio.Queue) -> None:
-    _subscribers.discard(q)
+    global _owner_loop
+    with _registry_lock:
+        _subscribers.discard(q)
+        # Reset the captured loop when the last subscriber leaves so a
+        # later subscribe() on a different loop (fresh TestClient, new
+        # uvicorn worker, reloaded tests) captures the right one.
+        if not _subscribers:
+            _owner_loop = None
 
 
 def _deliver(q: asyncio.Queue, payload: tuple) -> None:
@@ -58,14 +72,15 @@ def publish(event: str, data: str = "1") -> None:
     """Fire-and-forget from sync or async code, including worker threads.
     Cross-thread publishes are re-scheduled on the owning loop so queue
     mutation stays on a single thread."""
-    subs = list(_subscribers)
+    with _registry_lock:
+        subs = list(_subscribers)
+        target = _owner_loop
     if not subs:
         return
     try:
         current = asyncio.get_running_loop()
     except RuntimeError:
         current = None
-    target = _owner_loop
     payload = (event, data)
     if target is not None and current is not target:
         # Different thread (or no running loop here) → hop to the owner.
