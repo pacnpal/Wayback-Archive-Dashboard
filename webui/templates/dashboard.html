@@ -15,6 +15,24 @@
   </label>
 </fieldset>
 
+<fieldset class="opt-group" style="margin-bottom:1rem">
+  <legend>Global: Wayback probe timeout</legend>
+  <label class="opt" style="display:flex;gap:.5rem;align-items:center;margin:0">
+    <input type="number" id="top-probe-timeout" min="1" max="120" step="1"
+           value="{{ wayback_probe_timeout }}" style="width:5rem">
+    <span style="color:var(--pico-muted-color)">s</span>
+    <button type="button" class="secondary" style="padding:.2rem .6rem"
+            onclick="saveProbeTimeout(this,'top-probe-timeout','top-probe-timeout-msg')">Save</button>
+    <small id="top-probe-timeout-msg" style="color:var(--pico-muted-color)"></small>
+    <small class="opt-help" style="margin-left:auto">
+      Per-request timeout for the CDX heartbeat probe (1–120 s, default 45).
+      IA occasionally takes ~30 s to serve a trivial CDX lookup; the default
+      leaves headroom above that. Longer won't help when IA silently drops
+      packets (per-IP block).
+    </small>
+  </label>
+</fieldset>
+
 <h2>New archive job</h2>
 <form method="post" action="/jobs">
   <label>Target URL
@@ -111,16 +129,30 @@
       Jobs-in-parallel setting lives at the top of the page.
     </small>
     <script>
-    async function saveConcurrency(btn, inputId, msgId) {
+    // Shared POST helper for the toolbar setting inputs. Routes return
+    // a 303 redirect on success which, combined with redirect:'manual',
+    // surfaces as response.type === 'opaqueredirect' with status=0 —
+    // so we can't rely on response.ok alone. Treat any 3xx as success,
+    // everything else (4xx/5xx, network fail) as error.
+    async function saveSetting(btn, inputId, msgId, url, fieldName) {
       const v = document.getElementById(inputId).value;
       const msg = document.getElementById(msgId);
       btn.disabled = true; msg.textContent = 'saving…';
       try {
-        const fd = new FormData(); fd.append('max_concurrent', v);
-        await fetch('/settings/max-concurrent', {method:'POST', body: fd, redirect: 'manual'});
+        const fd = new FormData(); fd.append(fieldName, v);
+        const res = await fetch(url, {method:'POST', body: fd, redirect: 'manual'});
+        const redirected = res.type === 'opaqueredirect' ||
+                           (res.status >= 300 && res.status < 400);
+        if (!(res.ok || redirected)) throw new Error('HTTP ' + res.status);
         msg.textContent = '✓ saved';
       } catch(e) { msg.textContent = 'error: ' + e; }
       finally { btn.disabled = false; setTimeout(()=>msg.textContent='', 2000); }
+    }
+    async function saveConcurrency(btn, inputId, msgId) {
+      return saveSetting(btn, inputId, msgId, '/settings/max-concurrent', 'max_concurrent');
+    }
+    async function saveProbeTimeout(btn, inputId, msgId) {
+      return saveSetting(btn, inputId, msgId, '/settings/wayback-probe-timeout', 'timeout');
     }
     </script>
     <small>Uses the default option flags. Edit individual jobs afterward if needed.</small><br>

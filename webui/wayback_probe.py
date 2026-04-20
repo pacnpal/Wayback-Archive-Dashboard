@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
+import math
 import random
 import urllib.error
 import urllib.request
@@ -31,7 +32,15 @@ PROBE_URL = (
     "https://web.archive.org/cdx/search/cdx"
     "?url=example.com&limit=1&output=json"
 )
-PROBE_TIMEOUT = 15.0
+PROBE_TIMEOUT = 45      # default seconds per probe request; overridable via settings.
+# IA's CDX occasionally serves trivial 1-row lookups in ~30s during slow
+# periods. 45s leaves headroom above that. The worst case for a failing
+# probe (timeout) adds ~45s to the cycle time; with PROBE_INTERVAL=60s
+# that means the cadence stretches to ~105s instead of 60s during
+# outages — still responsive enough to catch recovery within a couple
+# of minutes.
+PROBE_TIMEOUT_MIN = 1
+PROBE_TIMEOUT_MAX = 120
 PROBE_INTERVAL = 60.0
 PROBE_JITTER = 10.0
 FAIL_THRESHOLD = 3      # consecutive probe failures before flipping to "down"
@@ -62,11 +71,54 @@ class ProbeState:
         return None
 
 
-def probe_once(url: str = PROBE_URL, timeout: float = PROBE_TIMEOUT) -> bool:
+def get_probe_timeout() -> int:
+    """Per-probe timeout in whole seconds. Reads the persisted setting
+    (settable via the dashboard) and falls back to ``PROBE_TIMEOUT``
+    when unset, garbage, or non-finite (NaN / ±inf can sneak past
+    ``float()`` and then crash ``round()``). Clamped to
+    ``[PROBE_TIMEOUT_MIN, PROBE_TIMEOUT_MAX]``. Integer so the UI input
+    round-trips cleanly."""
+    from . import jobs
+    raw = jobs.get_setting("wayback_probe_timeout", "")
+    if not raw:
+        return PROBE_TIMEOUT
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        return PROBE_TIMEOUT
+    if not math.isfinite(v):
+        return PROBE_TIMEOUT
+    return int(round(max(PROBE_TIMEOUT_MIN, min(PROBE_TIMEOUT_MAX, v))))
+
+
+def set_probe_timeout(seconds) -> int:
+    """Persist ``seconds`` after clamping. Accepts any stringish/numeric
+    input (route handler forwards the raw form value); falls back to
+    ``PROBE_TIMEOUT`` on garbage, then clamps to
+    ``[PROBE_TIMEOUT_MIN, PROBE_TIMEOUT_MAX]`` and quantizes to whole
+    seconds so the UI's integer input round-trips cleanly against the
+    persisted value. Returns the value actually written."""
+    from . import jobs
+    try:
+        v = float(seconds) if seconds is not None and seconds != "" else PROBE_TIMEOUT
+    except (TypeError, ValueError):
+        v = PROBE_TIMEOUT
+    if not math.isfinite(v):
+        v = PROBE_TIMEOUT
+    bounded = int(round(max(PROBE_TIMEOUT_MIN, min(PROBE_TIMEOUT_MAX, v))))
+    jobs.set_setting("wayback_probe_timeout", str(bounded))
+    return bounded
+
+
+def probe_once(url: str = PROBE_URL, timeout: "float | None" = None) -> bool:
     """One probe request. True iff CDX answered HTTP 200 within timeout.
     If the response object is missing both ``.status`` and ``.getcode()``
     we treat the probe as failed — this is a health check, so the safe
-    default is "not up" rather than the previous fail-open behavior."""
+    default is "not up" rather than the previous fail-open behavior.
+    ``timeout=None`` reads the persisted setting (falls back to
+    ``PROBE_TIMEOUT``)."""
+    if timeout is None:
+        timeout = get_probe_timeout()
     req = urllib.request.Request(url, headers={"User-Agent": "Wayback-Archive-Dashboard/probe"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:

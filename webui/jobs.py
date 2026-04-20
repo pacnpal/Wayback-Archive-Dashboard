@@ -592,10 +592,17 @@ async def _run_one(job: sqlite3.Row) -> None:
     events_bus.publish("jobs-changed")
 
 
-def _get_setting(key: str, default: str) -> str:
+def get_setting(key: str, default: str) -> str:
+    """Single-key read from the ``settings`` table with a default.
+    Centralized so cross-module consumers (e.g. wayback_probe) don't
+    embed their own SELECT and key-string knowledge."""
     with connect() as c:
         r = c.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
     return r["value"] if r else default
+
+
+# Backwards-compat alias — older internal callers still use this name.
+_get_setting = get_setting
 
 
 def set_setting(key: str, value: str) -> None:
@@ -610,7 +617,7 @@ def set_setting(key: str, value: str) -> None:
 
 def get_max_concurrent() -> int:
     try:
-        return max(1, min(20, int(_get_setting("max_concurrent", str(MAX_CONCURRENT_DEFAULT)))))
+        return max(1, min(20, int(get_setting("max_concurrent", str(MAX_CONCURRENT_DEFAULT)))))
     except ValueError:
         return MAX_CONCURRENT_DEFAULT
 

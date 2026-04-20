@@ -55,6 +55,43 @@ def test_manual_retry_noop_when_not_down(client, monkeypatch):
     assert called["n"] == 0
 
 
+def test_set_probe_timeout_endpoint_persists_value(client):
+    """The frontend POSTs /settings/wayback-probe-timeout; verify the
+    handler clamps and persists so the probe picks up the new value."""
+    c, wp, _ = client
+    r = c.post("/settings/wayback-probe-timeout", data={"timeout": "45"},
+               follow_redirects=False)
+    assert r.status_code in (303, 307)
+    got = wp.get_probe_timeout()
+    # Function is typed -> int; asserting against the int literal (not
+    # 45.0) catches a type regression that would otherwise pass because
+    # 45 == 45.0 in Python.
+    assert got == 45
+    assert isinstance(got, int)
+
+
+def test_set_probe_timeout_endpoint_clamps_out_of_range(client):
+    c, wp, _ = client
+    r = c.post("/settings/wayback-probe-timeout", data={"timeout": "9999"},
+               follow_redirects=False)
+    assert r.status_code in (303, 307)
+    got = wp.get_probe_timeout()
+    assert got == wp.PROBE_TIMEOUT_MAX
+    assert isinstance(got, int)
+
+
+def test_set_probe_timeout_endpoint_handles_empty_and_garbage(client):
+    """Route forwards raw form values; set_probe_timeout must tolerate
+    empty strings and non-numeric garbage without 500ing the endpoint
+    (the old route caught only ValueError, missed TypeError)."""
+    c, wp, _ = client
+    for val in ("", "abc", "nine seconds"):
+        r = c.post("/settings/wayback-probe-timeout", data={"timeout": val},
+                   follow_redirects=False)
+        assert r.status_code in (303, 307), f"failed for input={val!r}"
+        assert wp.get_probe_timeout() == wp.PROBE_TIMEOUT
+
+
 def test_banner_handles_naive_since_timestamp(client):
     """Regression: datetime.fromisoformat returns a naive datetime for
     strings without an offset. Subtracting that from tz-aware `now`

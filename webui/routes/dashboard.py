@@ -86,6 +86,7 @@ async def index(request: Request):
         "radio_groups": RADIO_GROUPS,
         "number_flags": NUMBER_FLAGS,
         "max_concurrent": jobs.get_max_concurrent(),
+        "wayback_probe_timeout": wayback_probe.get_probe_timeout(),
     })
 
 
@@ -202,6 +203,15 @@ async def set_max_concurrent(request: Request):
     except ValueError:
         n = 3
     jobs.set_setting("max_concurrent", str(n))
+    return RedirectResponse("/", status_code=303)
+
+
+@router.post("/settings/wayback-probe-timeout")
+async def set_wayback_probe_timeout(request: Request):
+    form = await request.form()
+    # set_probe_timeout handles None/empty/non-numeric/out-of-range on
+    # its own — the route just forwards the raw form value.
+    wayback_probe.set_probe_timeout(form.get("timeout"))
     return RedirectResponse("/", status_code=303)
 
 

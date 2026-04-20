@@ -226,6 +226,108 @@ def test_manual_retry_success_can_flip_up_and_release(probe_db, monkeypatch):
     assert row["not_before"] is None
 
 
+def test_probe_timeout_default_when_unset(tmp_path, monkeypatch):
+    monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+    import importlib
+    import webui.jobs as j
+    importlib.reload(j)
+    j.init_db()
+    import webui.wayback_probe as wp
+    importlib.reload(wp)
+    assert wp.get_probe_timeout() == wp.PROBE_TIMEOUT
+
+
+def test_probe_timeout_roundtrip(tmp_path, monkeypatch):
+    monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+    import importlib
+    import webui.jobs as j
+    importlib.reload(j)
+    j.init_db()
+    import webui.wayback_probe as wp
+    importlib.reload(wp)
+    # Integer in, integer out — so the UI's step="1" input round-trips
+    # cleanly without banker's-rounding drift.
+    assert wp.set_probe_timeout(45) == 45
+    assert wp.get_probe_timeout() == 45
+    assert isinstance(wp.get_probe_timeout(), int)
+
+
+def test_probe_timeout_quantizes_floats_to_whole_seconds(tmp_path, monkeypatch):
+    monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+    import importlib
+    import webui.jobs as j
+    importlib.reload(j)
+    j.init_db()
+    import webui.wayback_probe as wp
+    importlib.reload(wp)
+    # Fractional input rounds to int so the persisted value matches the
+    # integer the UI can actually display.
+    assert wp.set_probe_timeout(42.7) == 43
+    assert wp.get_probe_timeout() == 43
+
+
+def test_probe_timeout_rejects_non_finite_floats(tmp_path, monkeypatch):
+    """Regression: float('nan') and float('inf') parse successfully, then
+    round() raises (ValueError on nan, OverflowError on inf). Both input
+    paths (set_probe_timeout and the post-load round in get_probe_timeout)
+    must fall back to the default instead of crashing."""
+    monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+    import importlib
+    import webui.jobs as j
+    importlib.reload(j)
+    j.init_db()
+    import webui.wayback_probe as wp
+    importlib.reload(wp)
+
+    for bad in ("nan", "inf", "-inf", "NaN", "Infinity"):
+        assert wp.set_probe_timeout(bad) == wp.PROBE_TIMEOUT, bad
+
+    # And if a non-finite value somehow lands in the DB directly, the
+    # reader must not crash either.
+    j.set_setting("wayback_probe_timeout", "nan")
+    assert wp.get_probe_timeout() == wp.PROBE_TIMEOUT
+    j.set_setting("wayback_probe_timeout", "inf")
+    assert wp.get_probe_timeout() == wp.PROBE_TIMEOUT
+
+
+def test_probe_timeout_clamps_to_bounds(tmp_path, monkeypatch):
+    monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+    import importlib
+    import webui.jobs as j
+    importlib.reload(j)
+    j.init_db()
+    import webui.wayback_probe as wp
+    importlib.reload(wp)
+    # Over-max clamps down
+    assert wp.set_probe_timeout(500) == wp.PROBE_TIMEOUT_MAX
+    # Under-min clamps up
+    assert wp.set_probe_timeout(0.1) == wp.PROBE_TIMEOUT_MIN
+    # Garbage falls back to default, then clamps
+    assert wp.set_probe_timeout("not a number") == wp.PROBE_TIMEOUT
+
+
+def test_probe_once_uses_persisted_timeout(tmp_path, monkeypatch):
+    """Regression: probe_once's default timeout must pick up the persisted
+    setting, not the module-level 15 s constant. Otherwise the frontend
+    control wouldn't actually take effect."""
+    monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+    import importlib
+    import webui.jobs as j
+    importlib.reload(j)
+    j.init_db()
+    import webui.wayback_probe as wp
+    importlib.reload(wp)
+    wp.set_probe_timeout(42)
+    captured = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["timeout"] = timeout
+        raise urllib.error.URLError("stop here")
+    monkeypatch.setattr(wp.urllib.request, "urlopen", fake_urlopen)
+    wp.probe_once()
+    assert captured["timeout"] == 42
+
+
 def test_backoff_schedule():
     # attempts 0→first retry, 1→second, etc. Explicit early schedule,
     # doubling after 120m, capped at 24h.
