@@ -13,6 +13,26 @@ from .safe_path import safe_output_child
 
 logger = _log.get("sites_index")
 
+
+def _under_root(p: Path) -> Optional[Path]:
+    """Barrier: resolve ``p`` and confirm it lies within OUTPUT_ROOT.
+    Returns the resolved path on success, None on escape.
+
+    ``safe_output_child`` already acts as a barrier, but CodeQL loses the
+    sanitizer tag across ``str(path)`` and ``tempfile.mkstemp``'s return
+    value — mkstemp's output is a fresh string derived from the tainted
+    ``dir=`` arg, so static analysis re-taints the flow. Re-checking
+    inline at each filesystem sink makes the barrier visible to the
+    analyzer and is cheap defense-in-depth at runtime."""
+    try:
+        rp = p.resolve()
+    except OSError:
+        return None
+    base = jobs.OUTPUT_ROOT.resolve()
+    if not rp.is_relative_to(base):
+        return None
+    return rp
+
 INDEX_NAME = ".index.json"
 
 # Stamped on every cache entry. Bump when _measure semantics change so the
@@ -56,7 +76,13 @@ def _atomic_write(host: str, data: dict) -> None:
         return
     if not d.is_dir():
         return
-    fd, tmp = tempfile.mkstemp(prefix=".index.", dir=str(d))
+    fd, tmp_raw = tempfile.mkstemp(prefix=".index.", dir=str(d))
+    # Re-verify the mkstemp result lies under OUTPUT_ROOT before using it
+    # as a filesystem sink; see _under_root docstring.
+    tmp = _under_root(Path(tmp_raw))
+    if tmp is None:
+        os.close(fd)
+        return
     try:
         with os.fdopen(fd, "w") as f:
             json.dump(data, f)
@@ -75,6 +101,14 @@ def _measure(snapshot_dir: Path) -> dict:
     import time as _time
     t0 = _time.monotonic()
     logger.debug("measure start dir=%s", snapshot_dir)
+    # Re-verify the path is under OUTPUT_ROOT inline so CodeQL's
+    # path-injection tracker sees the barrier at the sink. Callers
+    # already built ``snapshot_dir`` from ``safe_output_child``, so
+    # escape here indicates either a symlink-to-outside or a bug.
+    root = _under_root(snapshot_dir)
+    if root is None:
+        return {}
+    snapshot_dir = root
     size = 0
     files = 0
     if not snapshot_dir.is_dir():
@@ -124,8 +158,8 @@ def refresh_index(host: str, timestamps: Optional[list[str]] = None) -> dict:
         snaps = [p.name for p in host_dir.iterdir() if p.is_dir() and is_snapshot_ts(p.name)]
     changed = False
     for ts in snaps:
-        sd = host_dir / ts
-        if not sd.is_dir():
+        sd = _under_root(host_dir / ts)
+        if sd is None or not sd.is_dir():
             if ts in idx:
                 del idx[ts]
                 changed = True
@@ -160,7 +194,9 @@ def get_index(host: str) -> dict:
             del idx[ts]
             dirty = True
     for ts in on_disk:
-        sd = host_dir / ts
+        sd = _under_root(host_dir / ts)
+        if sd is None:
+            continue
         cached = idx.get(ts)
         if cached and cached.get("v") == SNAPSHOT_VERSION:
             try:
