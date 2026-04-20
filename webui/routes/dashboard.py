@@ -357,20 +357,24 @@ async def api_wayback_status(request: Request):
     if status["state"] != "down":
         # Empty response keeps the slot in the DOM but invisible.
         return HTMLResponse("")
-    since = status.get("since")
-    since_dt = None
-    if since:
+    def _parse_utc(s: "str | None") -> "datetime | None":
+        """Parse an ISO timestamp and force tz-awareness. ``fromisoformat``
+        returns a naive datetime when the stored string lacks an offset,
+        which would then raise ``TypeError`` on subtraction against the
+        tz-aware ``now`` below and 500 the banner endpoint."""
+        if not s:
+            return None
         try:
-            since_dt = datetime.fromisoformat(since)
+            dt = datetime.fromisoformat(s)
         except Exception:
-            since_dt = None
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+
+    since_dt = _parse_utc(status.get("since"))
     next_retry = jobs.earliest_deferred_not_before()
-    next_retry_dt = None
-    if next_retry:
-        try:
-            next_retry_dt = datetime.fromisoformat(next_retry)
-        except Exception:
-            next_retry_dt = None
+    next_retry_dt = _parse_utc(next_retry)
     now = datetime.now(timezone.utc)
 
     def _human_delta(target: "datetime | None") -> str:

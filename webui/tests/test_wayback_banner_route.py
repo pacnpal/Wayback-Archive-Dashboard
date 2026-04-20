@@ -55,6 +55,22 @@ def test_manual_retry_noop_when_not_down(client, monkeypatch):
     assert called["n"] == 0
 
 
+def test_banner_handles_naive_since_timestamp(client):
+    """Regression: datetime.fromisoformat returns a naive datetime for
+    strings without an offset. Subtracting that from tz-aware `now`
+    would raise TypeError and 500 the endpoint. The route must treat a
+    bare ISO timestamp as UTC."""
+    c, wp, _ = client
+    # Store an intentionally naive timestamp (no TZ offset) to simulate
+    # older DBs or hand-edited rows.
+    wp.save_state(wp.ProbeState(state="down", consecutive_fails=5),
+                  since_iso="2026-04-20T12:00:00")
+    r = c.get("/api/wayback-status")
+    assert r.status_code == 200
+    assert "Internet Archive unreachable" in r.text
+    assert "down for" in r.text
+
+
 def test_manual_retry_runs_probe_when_down(client, monkeypatch):
     c, wp, _ = client
     wp.save_state(wp.ProbeState(state="down", consecutive_fails=5))

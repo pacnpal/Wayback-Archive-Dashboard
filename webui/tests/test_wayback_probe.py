@@ -159,6 +159,7 @@ def test_probe_loop_reloads_state_each_iteration(probe_db, monkeypatch):
     for its lifetime, so a manual retry's write could be clobbered by
     the next scheduled save. Verify one iteration reads fresh state."""
     import asyncio
+    import threading
     wp, _ = probe_db
     # Start with state=up. Between iterations, something else writes
     # state=down to the DB — the next loop tick must respect it, not
@@ -169,13 +170,24 @@ def test_probe_loop_reloads_state_each_iteration(probe_db, monkeypatch):
     # Simulate an external mutation (manual retry would do this).
     wp.save_state(wp.ProbeState(state="down", consecutive_fails=3))
 
-    # Drive exactly one iteration: run probe_loop briefly, then stop.
+    # Signal the moment the loop finishes its first save_state call so
+    # the driver can stop the loop deterministically instead of relying
+    # on a fixed sleep that might fire mid-iteration on a slow host.
+    saved = threading.Event()
+    orig_save = wp.save_state
+
+    def trap_save(s, since_iso=None):
+        orig_save(s, since_iso)
+        saved.set()
+    monkeypatch.setattr(wp, "save_state", trap_save)
+
     async def driver():
         stop = asyncio.Event()
         task = asyncio.create_task(wp.probe_loop(stop))
-        await asyncio.sleep(0.05)
+        while not saved.is_set():
+            await asyncio.sleep(0.01)
         stop.set()
-        await task
+        await asyncio.wait_for(task, timeout=2.0)
 
     asyncio.run(driver())
     # The loop observed False against the RELOADED state (which was
