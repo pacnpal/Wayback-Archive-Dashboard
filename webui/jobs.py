@@ -118,6 +118,13 @@ def init_db() -> None:
                     pass
                 else:
                     raise
+        # Composite index for the worker's hot-path queries
+        # (pick_ready_pending, earliest_deferred_not_before). Covers the
+        # WHERE status='pending' AND not_before predicate.
+        c.execute(
+            "CREATE INDEX IF NOT EXISTS idx_jobs_status_not_before "
+            "ON jobs(status, not_before)"
+        )
         # Recover orphans: jobs that were mid-run when the container stopped
         # go back to pending so the worker picks them up again on startup.
         orphans = [r[0] for r in c.execute(

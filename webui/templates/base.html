@@ -98,7 +98,7 @@
   .wayback-banner .banner-retry.htmx-request { opacity: .5; cursor: progress; }
 </style>
 </head>
-<body>
+<body hx-sse:connect="/events">
 <nav>
   <ul>
     <li><strong>🗄 Wayback Archive</strong></li>
@@ -109,7 +109,6 @@
   </ul>
 </nav>
 <div id="wayback-banner-slot"
-     hx-sse:connect="/events"
      hx-get="/api/wayback-status"
      hx-trigger="load, every 30s, sse:wayback-state-changed"
      hx-swap="innerHTML"></div>

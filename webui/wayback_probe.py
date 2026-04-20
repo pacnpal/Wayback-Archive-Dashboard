@@ -120,18 +120,28 @@ def save_state(s: ProbeState, since_iso: Optional[str] = None) -> None:
         "consecutive_fails": s.consecutive_fails,
         "consecutive_ok": s.consecutive_ok,
     })
+    # Connection is in autocommit mode (isolation_level=None), so each
+    # execute is its own transaction by default. Wrap the two writes so
+    # state and state_since can't desync if the process crashes between
+    # them.
     with jobs.connect() as c:
-        c.execute(
-            "INSERT INTO settings(key,value) VALUES(?,?) "
-            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            ("wayback_probe_state", payload),
-        )
-        if since_iso:
+        c.execute("BEGIN")
+        try:
             c.execute(
                 "INSERT INTO settings(key,value) VALUES(?,?) "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                ("wayback_state_since", since_iso),
+                ("wayback_probe_state", payload),
             )
+            if since_iso:
+                c.execute(
+                    "INSERT INTO settings(key,value) VALUES(?,?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    ("wayback_state_since", since_iso),
+                )
+            c.execute("COMMIT")
+        except Exception:
+            c.execute("ROLLBACK")
+            raise
 
 
 def is_wayback_up() -> bool:
