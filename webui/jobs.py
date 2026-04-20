@@ -490,7 +490,16 @@ async def _run_one(job: sqlite3.Row) -> None:
         try:
             paths = json.loads(repair_raw)
             if paths:
-                env["REPAIR_PATHS"] = "|".join(paths)
+                # Write the rel-path list to a sidecar file instead of
+                # passing it as an env var: Linux caps a single env or
+                # argv string at PAGE_SIZE*32 (128 KB) via
+                # MAX_ARG_STRLEN, and a single 1997-era snapshot can
+                # have ~5000 missing rels = ~235 KB, which makes execve
+                # return E2BIG and the job terminal-errors before the
+                # shim ever starts. The file form has no size limit.
+                paths_file = Path(job["site_dir"]) / ".repair-paths"
+                paths_file.write_text("\n".join(paths), encoding="utf-8")
+                env["REPAIR_PATHS_FILE"] = str(paths_file)
                 entry_module = "webui.wayback_repair_shim"
         except Exception:
             pass

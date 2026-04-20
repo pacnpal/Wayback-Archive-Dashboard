@@ -61,11 +61,29 @@ def _write_atomic(path: Path, data: bytes) -> None:
 def main() -> int:
     out_dir = os.environ.get("OUTPUT_DIR")
     wayback_url = os.environ.get("WAYBACK_URL", "")
+    paths_file = os.environ.get("REPAIR_PATHS_FILE", "")
     paths_env = os.environ.get("REPAIR_PATHS", "")
-    if not out_dir or not wayback_url or not paths_env:
-        log.error("missing OUTPUT_DIR / WAYBACK_URL / REPAIR_PATHS")
+    if not out_dir or not wayback_url or not (paths_file or paths_env):
+        log.error("missing OUTPUT_DIR / WAYBACK_URL / REPAIR_PATHS[_FILE]")
         return 2
-    rel_paths = [p.strip() for p in paths_env.split("|") if p.strip()]
+    # Prefer the file form: Linux caps a single env/argv string at
+    # PAGE_SIZE*32 (128 KB), which older repair lists easily exceed —
+    # ~5000 rel paths for a single 1997-era snapshot is ~235 KB and
+    # execve() returns E2BIG. The file form carries any size.
+    if paths_file:
+        try:
+            with open(paths_file, "r", encoding="utf-8") as f:
+                raw = f.read()
+        except OSError as e:
+            log.error("cannot read REPAIR_PATHS_FILE=%s: %s", paths_file, e)
+            return 2
+        # Tolerate either newline- or pipe-separated payloads so this
+        # path accepts legacy job rows that were enqueued before the
+        # dashboard switched formats.
+        sep = "\n" if "\n" in raw else "|"
+        rel_paths = [p.strip() for p in raw.split(sep) if p.strip()]
+    else:
+        rel_paths = [p.strip() for p in paths_env.split("|") if p.strip()]
     if not rel_paths:
         log.error("no paths to repair")
         return 2
