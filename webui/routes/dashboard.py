@@ -366,7 +366,7 @@ async def api_wayback_status(request: Request):
             return None
         try:
             dt = datetime.fromisoformat(s)
-        except Exception:
+        except (TypeError, ValueError):
             return None
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)

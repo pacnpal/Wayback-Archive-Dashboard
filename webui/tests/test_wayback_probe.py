@@ -184,8 +184,9 @@ def test_probe_loop_reloads_state_each_iteration(probe_db, monkeypatch):
     async def driver():
         stop = asyncio.Event()
         task = asyncio.create_task(wp.probe_loop(stop))
-        while not saved.is_set():
-            await asyncio.sleep(0.01)
+        # Bounded wait: if the loop regresses and never calls save_state
+        # the test fails fast instead of hanging the suite.
+        await asyncio.wait_for(asyncio.to_thread(saved.wait), timeout=2.0)
         stop.set()
         await asyncio.wait_for(task, timeout=2.0)
 
