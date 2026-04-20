@@ -31,7 +31,9 @@ PROBE_URL = (
     "https://web.archive.org/cdx/search/cdx"
     "?url=example.com&limit=1&output=json"
 )
-PROBE_TIMEOUT = 15.0
+PROBE_TIMEOUT = 15.0    # default seconds per probe request; overridable via settings
+PROBE_TIMEOUT_MIN = 1.0
+PROBE_TIMEOUT_MAX = 120.0
 PROBE_INTERVAL = 60.0
 PROBE_JITTER = 10.0
 FAIL_THRESHOLD = 3      # consecutive probe failures before flipping to "down"
@@ -62,11 +64,50 @@ class ProbeState:
         return None
 
 
-def probe_once(url: str = PROBE_URL, timeout: float = PROBE_TIMEOUT) -> bool:
+def get_probe_timeout() -> float:
+    """Per-probe timeout in seconds. Reads the persisted setting (settable
+    via the dashboard) and falls back to ``PROBE_TIMEOUT`` when unset or
+    garbage. Clamped to ``[PROBE_TIMEOUT_MIN, PROBE_TIMEOUT_MAX]``."""
+    from . import jobs
+    with jobs.connect() as c:
+        row = c.execute(
+            "SELECT value FROM settings WHERE key='wayback_probe_timeout'"
+        ).fetchone()
+    if not row or row["value"] is None:
+        return PROBE_TIMEOUT
+    try:
+        v = float(row["value"])
+    except (TypeError, ValueError):
+        return PROBE_TIMEOUT
+    return max(PROBE_TIMEOUT_MIN, min(PROBE_TIMEOUT_MAX, v))
+
+
+def set_probe_timeout(seconds: float) -> float:
+    """Persist ``seconds`` after clamping. Returns the value actually written."""
+    from . import jobs
+    try:
+        v = float(seconds)
+    except (TypeError, ValueError):
+        v = PROBE_TIMEOUT
+    bounded = max(PROBE_TIMEOUT_MIN, min(PROBE_TIMEOUT_MAX, v))
+    with jobs.connect() as c:
+        c.execute(
+            "INSERT INTO settings(key,value) VALUES(?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            ("wayback_probe_timeout", str(bounded)),
+        )
+    return bounded
+
+
+def probe_once(url: str = PROBE_URL, timeout: "float | None" = None) -> bool:
     """One probe request. True iff CDX answered HTTP 200 within timeout.
     If the response object is missing both ``.status`` and ``.getcode()``
     we treat the probe as failed — this is a health check, so the safe
-    default is "not up" rather than the previous fail-open behavior."""
+    default is "not up" rather than the previous fail-open behavior.
+    ``timeout=None`` reads the persisted setting (falls back to
+    ``PROBE_TIMEOUT``)."""
+    if timeout is None:
+        timeout = get_probe_timeout()
     req = urllib.request.Request(url, headers={"User-Agent": "Wayback-Archive-Dashboard/probe"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:

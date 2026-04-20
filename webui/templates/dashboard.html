@@ -15,6 +15,23 @@
   </label>
 </fieldset>
 
+<fieldset class="opt-group" style="margin-bottom:1rem">
+  <legend>Global: Wayback probe timeout</legend>
+  <label class="opt" style="display:flex;gap:.5rem;align-items:center;margin:0">
+    <input type="number" id="top-probe-timeout" min="1" max="120" step="1"
+           value="{{ '%d'|format(wayback_probe_timeout|round|int) }}" style="width:5rem">
+    <span style="color:var(--pico-muted-color)">s</span>
+    <button type="button" class="secondary" style="padding:.2rem .6rem"
+            onclick="saveProbeTimeout(this,'top-probe-timeout','top-probe-timeout-msg')">Save</button>
+    <small id="top-probe-timeout-msg" style="color:var(--pico-muted-color)"></small>
+    <small class="opt-help" style="margin-left:auto">
+      Per-request timeout for the CDX heartbeat probe (1–120 s, default 15).
+      Raise if IA is slow-but-reachable and probes are timing out; leave at default
+      if IA silently drops packets — longer won't help.
+    </small>
+  </label>
+</fieldset>
+
 <h2>New archive job</h2>
 <form method="post" action="/jobs">
   <label>Target URL
@@ -118,6 +135,17 @@
       try {
         const fd = new FormData(); fd.append('max_concurrent', v);
         await fetch('/settings/max-concurrent', {method:'POST', body: fd, redirect: 'manual'});
+        msg.textContent = '✓ saved';
+      } catch(e) { msg.textContent = 'error: ' + e; }
+      finally { btn.disabled = false; setTimeout(()=>msg.textContent='', 2000); }
+    }
+    async function saveProbeTimeout(btn, inputId, msgId) {
+      const v = document.getElementById(inputId).value;
+      const msg = document.getElementById(msgId);
+      btn.disabled = true; msg.textContent = 'saving…';
+      try {
+        const fd = new FormData(); fd.append('timeout', v);
+        await fetch('/settings/wayback-probe-timeout', {method:'POST', body: fd, redirect: 'manual'});
         msg.textContent = '✓ saved';
       } catch(e) { msg.textContent = 'error: ' + e; }
       finally { btn.disabled = false; setTimeout(()=>msg.textContent='', 2000); }

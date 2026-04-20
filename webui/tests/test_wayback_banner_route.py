@@ -55,6 +55,23 @@ def test_manual_retry_noop_when_not_down(client, monkeypatch):
     assert called["n"] == 0
 
 
+def test_set_probe_timeout_endpoint_persists_value(client):
+    """The frontend POSTs /settings/wayback-probe-timeout; verify the
+    handler clamps and persists so the probe picks up the new value."""
+    c, wp, _ = client
+    r = c.post("/settings/wayback-probe-timeout", data={"timeout": "45"},
+               follow_redirects=False)
+    assert r.status_code in (303, 307)
+    assert wp.get_probe_timeout() == 45.0
+
+
+def test_set_probe_timeout_endpoint_clamps_out_of_range(client):
+    c, wp, _ = client
+    c.post("/settings/wayback-probe-timeout", data={"timeout": "9999"},
+           follow_redirects=False)
+    assert wp.get_probe_timeout() == wp.PROBE_TIMEOUT_MAX
+
+
 def test_banner_handles_naive_since_timestamp(client):
     """Regression: datetime.fromisoformat returns a naive datetime for
     strings without an offset. Subtracting that from tz-aware `now`

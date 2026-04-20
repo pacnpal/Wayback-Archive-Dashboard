@@ -226,6 +226,67 @@ def test_manual_retry_success_can_flip_up_and_release(probe_db, monkeypatch):
     assert row["not_before"] is None
 
 
+def test_probe_timeout_default_when_unset(tmp_path, monkeypatch):
+    monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+    import importlib
+    import webui.jobs as j
+    importlib.reload(j)
+    j.init_db()
+    import webui.wayback_probe as wp
+    importlib.reload(wp)
+    assert wp.get_probe_timeout() == wp.PROBE_TIMEOUT
+
+
+def test_probe_timeout_roundtrip(tmp_path, monkeypatch):
+    monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+    import importlib
+    import webui.jobs as j
+    importlib.reload(j)
+    j.init_db()
+    import webui.wayback_probe as wp
+    importlib.reload(wp)
+    assert wp.set_probe_timeout(45) == 45.0
+    assert wp.get_probe_timeout() == 45.0
+
+
+def test_probe_timeout_clamps_to_bounds(tmp_path, monkeypatch):
+    monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+    import importlib
+    import webui.jobs as j
+    importlib.reload(j)
+    j.init_db()
+    import webui.wayback_probe as wp
+    importlib.reload(wp)
+    # Over-max clamps down
+    assert wp.set_probe_timeout(500) == wp.PROBE_TIMEOUT_MAX
+    # Under-min clamps up
+    assert wp.set_probe_timeout(0.1) == wp.PROBE_TIMEOUT_MIN
+    # Garbage falls back to default, then clamps
+    assert wp.set_probe_timeout("not a number") == wp.PROBE_TIMEOUT
+
+
+def test_probe_once_uses_persisted_timeout(tmp_path, monkeypatch):
+    """Regression: probe_once's default timeout must pick up the persisted
+    setting, not the module-level 15 s constant. Otherwise the frontend
+    control wouldn't actually take effect."""
+    monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+    import importlib
+    import webui.jobs as j
+    importlib.reload(j)
+    j.init_db()
+    import webui.wayback_probe as wp
+    importlib.reload(wp)
+    wp.set_probe_timeout(42)
+    captured = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["timeout"] = timeout
+        raise urllib.error.URLError("stop here")
+    monkeypatch.setattr(wp.urllib.request, "urlopen", fake_urlopen)
+    wp.probe_once()
+    assert captured["timeout"] == 42.0
+
+
 def test_backoff_schedule():
     # attempts 0→first retry, 1→second, etc. Explicit early schedule,
     # doubling after 120m, capped at 24h.
