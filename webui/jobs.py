@@ -158,15 +158,23 @@ def _normalize_target(url: str) -> str:
 
 
 def enqueue(target_url: str, timestamp: Optional[str], flags: dict, schedule_id: Optional[int] = None) -> int:
+    logger.debug("enqueue enter target=%r ts=%r flags=%s schedule_id=%s",
+                 target_url, timestamp, flags, schedule_id)
     target_url = _normalize_target(target_url)
     if timestamp:
         resolved_ts, resolved_url = timestamp, target_url
+        logger.debug("enqueue using provided ts=%s (skipping CDX lookup)",
+                     resolved_ts)
     else:
+        logger.debug("enqueue resolving latest snapshot via CDX for %s",
+                     target_url)
         latest = wayback.latest_snapshot(target_url)
         if not latest:
             raise ValueError(f"No Wayback snapshots found for {target_url}")
         resolved_ts, resolved_url = latest
         resolved_url = _normalize_target(resolved_url)
+        logger.debug("enqueue CDX resolved ts=%s url=%s",
+                     resolved_ts, resolved_url)
     host = wayback.host_of(resolved_url)
     site_dir = str(OUTPUT_ROOT / host / resolved_ts)
     log_path = str(Path(site_dir) / ".log")
@@ -182,6 +190,10 @@ def enqueue(target_url: str, timestamp: Optional[str], flags: dict, schedule_id:
         )
         jid = cur.lastrowid
     logger.info("enqueue job=%d url=%s ts=%s", jid, target_url, resolved_ts)
+    logger.debug(
+        "enqueue persisted job=%d host=%s site_dir=%s log=%s wb=%s flags=%s",
+        jid, host, site_dir, log_path, wb, flags,
+    )
     events_bus.publish("jobs-changed")
     return jid
 
@@ -339,6 +351,14 @@ def cancel_many(ids: list[int]) -> int:
     return cancelled + r
 
 
+def _debug_sample_rows(rows: list[sqlite3.Row], label: str) -> None:
+    if not _log.is_debug() or not rows:
+        return
+    sample = [(r["id"], r["host"], r["timestamp"], r["status"]) for r in rows[:5]]
+    logger.debug("%s rows=%d sample=%s%s",
+                 label, len(rows), sample, " ..." if len(rows) > 5 else "")
+
+
 def pick_ready_pending(limit: int) -> list[sqlite3.Row]:
     """Pending jobs whose ``not_before`` has elapsed (or is NULL).
     Repair jobs (``repair_paths_json`` non-null) sort before full-archive
@@ -348,7 +368,7 @@ def pick_ready_pending(limit: int) -> list[sqlite3.Row]:
     missing-asset queue surfaced by the dashboard."""
     now = now_iso()
     with connect() as c:
-        return c.execute(
+        rows = c.execute(
             "SELECT * FROM jobs "
             "WHERE status='pending' "
             "AND (not_before IS NULL OR not_before <= ?) "
@@ -356,6 +376,8 @@ def pick_ready_pending(limit: int) -> list[sqlite3.Row]:
             "id ASC LIMIT ?",
             (now, limit),
         ).fetchall()
+    _debug_sample_rows(rows, "pick_ready_pending")
+    return rows
 
 
 def defer_for_outage(job_id: int, now: Optional[datetime] = None) -> None:
@@ -368,6 +390,10 @@ def defer_for_outage(job_id: int, now: Optional[datetime] = None) -> None:
         old_attempts = int(row["attempts"] or 0) if row else 0
         delay_s = wayback_probe.backoff_seconds(old_attempts)
         nb = (now + timedelta(seconds=delay_s)).replace(microsecond=0).isoformat()
+        logger.debug(
+            "defer compute job=%d old_attempts=%d backoff=%ds (%.1fm) not_before=%s",
+            job_id, old_attempts, delay_s, delay_s / 60, nb,
+        )
         c.execute(
             "UPDATE jobs SET status='pending', started_at=NULL, finished_at=NULL, "
             "attempts=?, not_before=? WHERE id=?",
@@ -427,29 +453,37 @@ def get_job(job_id: int) -> Optional[sqlite3.Row]:
 
 
 def cancel_job(job_id: int) -> bool:
+    logger.debug("cancel_job enter job=%d", job_id)
     _cancelled.add(job_id)
     proc = _running.get(job_id)
     if proc and proc.returncode is None:
         try:
+            logger.debug("cancel_job sending SIGTERM job=%d pid=%s",
+                         job_id, proc.pid)
             proc.send_signal(signal.SIGTERM)
         except ProcessLookupError:
-            pass
+            logger.debug("cancel_job pid gone job=%d", job_id)
         return True
     with connect() as c:
-        c.execute(
+        n = c.execute(
             "UPDATE jobs SET status='cancelled', finished_at=? WHERE id=? AND status='pending'",
             (now_iso(), job_id),
-        )
+        ).rowcount
+    logger.debug("cancel_job job=%d not running — pending_cancelled_rows=%d",
+                 job_id, n)
     return False
 
 
 async def _pump_log_with_timestamps(
-    reader: asyncio.StreamReader, log_f
+    reader: asyncio.StreamReader, log_f, job_id: int | None = None,
 ) -> None:
     """Read subprocess stdout line-by-line and append each line to log_f
     prefixed with a wall-clock timestamp. Lines that already start with an
     ISO8601 timestamp (the shim's own logger) pass through unchanged so we
     don't double-stamp them."""
+    lines = 0
+    bytes_written = 0
+    logger.debug("pump start job=%s", job_id)
     while True:
         try:
             line = await reader.readuntil(b"\n")
@@ -457,11 +491,22 @@ async def _pump_log_with_timestamps(
             # Subprocess closed without a trailing newline — flush what's left.
             if e.partial:
                 log_f.write(e.partial)
+                bytes_written += len(e.partial)
+            logger.debug("pump eof job=%s lines=%d bytes=%d (incomplete read)",
+                         job_id, lines, bytes_written)
             return
+        lines += 1
         if _TS_LINE_RE.match(line):
             log_f.write(line)
+            bytes_written += len(line)
         else:
-            log_f.write(now_iso().encode() + b" " + line)
+            stamped = now_iso().encode() + b" " + line
+            log_f.write(stamped)
+            bytes_written += len(stamped)
+        # Avoid crushing DEBUG with per-line noise — sample every 100 lines.
+        if _log.is_debug() and lines % 100 == 0:
+            logger.debug("pump job=%s lines=%d bytes=%d (rolling)",
+                         job_id, lines, bytes_written)
 
 
 async def _run_one(job: sqlite3.Row) -> None:
@@ -510,6 +555,14 @@ async def _run_one(job: sqlite3.Row) -> None:
             (now_iso(), job["id"]),
         )
     logger.info("start job=%d host=%s ts=%s", job["id"], job["host"], job["timestamp"])
+    if _log.is_debug():
+        passthrough = {k: env[k] for k in UPSTREAM_FLAGS if k in env}
+        logger.debug(
+            "spawn job=%d module=%s wayback_url=%s site_dir=%s "
+            "log_path=%s flags=%s",
+            job["id"], entry_module, env["WAYBACK_URL"], env["OUTPUT_DIR"],
+            job["log_path"], passthrough,
+        )
     log_f = open(job["log_path"], "ab", buffering=0)
     try:
         # `-u` forces line-buffered stdout so the pump doesn't sit on a 4KB
@@ -522,18 +575,26 @@ async def _run_one(job: sqlite3.Row) -> None:
             stderr=asyncio.subprocess.STDOUT,
             limit=1 << 20,
         )
+        logger.debug("subprocess pid=%s started for job=%d", proc.pid, job["id"])
         _running[job["id"]] = proc
-        pump = asyncio.create_task(_pump_log_with_timestamps(proc.stdout, log_f))
+        pump = asyncio.create_task(
+            _pump_log_with_timestamps(proc.stdout, log_f, job["id"])
+        )
         rc = await proc.wait()
+        logger.debug("subprocess pid=%s exit rc=%s job=%d — draining pump (<=10s)",
+                     proc.pid, rc, job["id"])
         # Drain any lines still buffered in the pipe after the subprocess
         # exited. Bounded wait so a stuck pump can't hang the worker.
         try:
             await asyncio.wait_for(pump, timeout=10.0)
         except asyncio.TimeoutError:
+            logger.debug("pump drain timed out job=%d — cancelling", job["id"])
             pump.cancel()
     finally:
         log_f.close()
         _running.pop(job["id"], None)
+        logger.debug("job=%d cleanup done (log closed, _running slot freed)",
+                     job["id"])
     if job["id"] in _cancelled:
         status = "cancelled"
         _cancelled.discard(job["id"])
@@ -616,10 +677,16 @@ def set_setting(key: str, value: str) -> None:
 
 
 def get_max_concurrent() -> int:
+    raw = get_setting("max_concurrent", str(MAX_CONCURRENT_DEFAULT))
     try:
-        return max(1, min(20, int(get_setting("max_concurrent", str(MAX_CONCURRENT_DEFAULT)))))
+        v = max(1, min(20, int(raw)))
     except ValueError:
-        return MAX_CONCURRENT_DEFAULT
+        v = MAX_CONCURRENT_DEFAULT
+    # Noisy — worker_loop calls this every tick — keep at DEBUG only.
+    if _log.is_debug():
+        logger.debug("get_max_concurrent raw=%r -> %d (default=%d)",
+                     raw, v, MAX_CONCURRENT_DEFAULT)
+    return v
 
 
 async def _run_job(row):
@@ -641,15 +708,26 @@ async def _run_job(row):
 async def worker_loop(stop: asyncio.Event) -> None:
     from . import wayback_probe
     active: set[asyncio.Task] = set()
+    tick = 0
+    logger.debug("worker loop start max_concurrent_default=%d", MAX_CONCURRENT_DEFAULT)
     while not stop.is_set():
+        tick += 1
         limit = get_max_concurrent()
         # Reap finished tasks
         done = {t for t in active if t.done()}
+        if done:
+            logger.debug("worker tick=%d reaped=%d finished tasks", tick, len(done))
         active -= done
         # Authoritative throttle: pull at most (limit - in-flight) pending jobs
         # per tick. This is where `max_concurrent` is actually enforced.
         headroom = max(0, limit - len(active))
+        logger.debug(
+            "worker tick=%d heartbeat limit=%d active=%d headroom=%d",
+            tick, limit, len(active), headroom,
+        )
         if headroom == 0:
+            logger.debug("worker tick=%d saturated — waiting up to 2s for a slot",
+                         tick)
             try:
                 await asyncio.wait(active, timeout=2.0, return_when=asyncio.FIRST_COMPLETED)
             except ValueError:
@@ -658,6 +736,10 @@ async def worker_loop(stop: asyncio.Event) -> None:
         # Outage gate: if the probe says CDX is down, don't pop new jobs.
         # In-flight jobs continue so they can finish/fail on their own.
         if not wayback_probe.is_wayback_up():
+            logger.debug(
+                "worker tick=%d outage gate closed (wayback down) — "
+                "active=%d sleeping 5s", tick, len(active),
+            )
             try:
                 if active:
                     await asyncio.wait(active, timeout=5.0, return_when=asyncio.FIRST_COMPLETED)
@@ -667,7 +749,13 @@ async def worker_loop(stop: asyncio.Event) -> None:
                 pass
             continue
         rows = pick_ready_pending(headroom)
+        logger.debug("worker tick=%d pick_ready_pending(headroom=%d) -> %d rows",
+                     tick, headroom, len(rows))
         if not rows:
+            logger.debug(
+                "worker tick=%d idle — sleeping 2s (active=%d)",
+                tick, len(active),
+            )
             try:
                 if active:
                     await asyncio.wait(active, timeout=2.0, return_when=asyncio.FIRST_COMPLETED)
@@ -677,7 +765,15 @@ async def worker_loop(stop: asyncio.Event) -> None:
                 pass
             continue
         for row in rows:
+            logger.debug(
+                "worker tick=%d launching job=%d host=%s ts=%s repair=%s",
+                tick, row["id"], row["host"], row["timestamp"],
+                bool(row["repair_paths_json"]) if "repair_paths_json" in row.keys() else False,
+            )
             active.add(asyncio.create_task(_run_job(row)))
     # Shutdown: wait for in-flight to finish
+    logger.debug("worker loop exit after tick=%d active=%d — awaiting drain",
+                 tick, len(active))
     if active:
         await asyncio.gather(*active, return_exceptions=True)
+    logger.debug("worker loop fully drained")

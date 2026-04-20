@@ -14,6 +14,9 @@ from __future__ import annotations
 import asyncio
 import threading
 
+from . import log as _log
+logger = _log.get("events_bus")
+
 _subscribers: set[asyncio.Queue] = set()
 _MAX_QUEUE = 64
 # The loop that owns the subscriber queues. Captured lazily at the first
@@ -32,12 +35,18 @@ def subscribe() -> asyncio.Queue:
     global _owner_loop
     q: asyncio.Queue = asyncio.Queue(maxsize=_MAX_QUEUE)
     with _registry_lock:
+        fresh_loop = _owner_loop is None
         if _owner_loop is None:
             try:
                 _owner_loop = asyncio.get_running_loop()
             except RuntimeError:
                 _owner_loop = None
         _subscribers.add(q)
+        count = len(_subscribers)
+    logger.debug(
+        "subscribe qid=%s total_subs=%d owner_loop_captured=%s max_queue=%d",
+        id(q), count, fresh_loop, _MAX_QUEUE,
+    )
     return q
 
 
@@ -48,8 +57,13 @@ def unsubscribe(q: asyncio.Queue) -> None:
         # Reset the captured loop when the last subscriber leaves so a
         # later subscribe() on a different loop (fresh TestClient, new
         # uvicorn worker, reloaded tests) captures the right one.
+        reset = False
         if not _subscribers:
             _owner_loop = None
+            reset = True
+        count = len(_subscribers)
+    logger.debug("unsubscribe qid=%s remaining=%d owner_loop_reset=%s",
+                 id(q), count, reset)
 
 
 def _deliver(q: asyncio.Queue, payload: tuple) -> None:
@@ -60,12 +74,13 @@ def _deliver(q: asyncio.Queue, payload: tuple) -> None:
     except asyncio.QueueFull:
         try:
             q.get_nowait()
+            logger.debug("deliver qid=%s queue full — dropped oldest", id(q))
         except asyncio.QueueEmpty:
             pass
         try:
             q.put_nowait(payload)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("deliver qid=%s retry put_nowait failed: %s", id(q), e)
 
 
 def publish(event: str, data: str = "1") -> None:
@@ -76,6 +91,8 @@ def publish(event: str, data: str = "1") -> None:
         subs = list(_subscribers)
         target = _owner_loop
     if not subs:
+        logger.debug("publish event=%s data=%r — no subscribers (dropped)",
+                     event, data)
         return
     try:
         current = asyncio.get_running_loop()
@@ -84,13 +101,21 @@ def publish(event: str, data: str = "1") -> None:
     payload = (event, data)
     if target is not None and current is not target:
         # Different thread (or no running loop here) → hop to the owner.
+        logger.debug(
+            "publish event=%s data=%r subs=%d CROSS-THREAD hop to owner loop "
+            "(current=%s target=%s)",
+            event, data, len(subs), id(current) if current else None, id(target),
+        )
         for q in subs:
             try:
                 target.call_soon_threadsafe(_deliver, q, payload)
             except RuntimeError:
                 # Loop is closed — nothing useful to do.
-                pass
+                logger.debug("publish event=%s qid=%s target loop closed — skip",
+                             event, id(q))
         return
     # Fast path: we're on the same loop that owns the queues.
+    logger.debug("publish event=%s data=%r subs=%d same-loop fast path",
+                 event, data, len(subs))
     for q in subs:
         _deliver(q, payload)

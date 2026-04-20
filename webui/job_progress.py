@@ -5,6 +5,9 @@ import re
 from pathlib import Path
 from typing import Optional
 
+from . import log as _log
+logger = _log.get("job_progress")
+
 _STEP_RE = re.compile(r"\[(\d+)(?:\s*\(limit:\s*\d+\))?\]")
 _QUEUE_RE = re.compile(r"Queue:\s*(\d+)\s+files remaining")
 _DONE_RE = re.compile(r"Download Complete!", re.IGNORECASE)
@@ -15,6 +18,7 @@ _TAIL_BYTES = 65536
 def read_progress(log_path: str, max_files: Optional[int] = None) -> Optional[dict]:
     p = Path(log_path)
     if not p.is_file():
+        logger.debug("read_progress miss (no file) path=%s", log_path)
         return None
     try:
         size = p.stat().st_size
@@ -22,8 +26,11 @@ def read_progress(log_path: str, max_files: Optional[int] = None) -> Optional[di
             if size > _TAIL_BYTES:
                 f.seek(-_TAIL_BYTES, os.SEEK_END)
             data = f.read()
-    except OSError:
+    except OSError as e:
+        logger.debug("read_progress read error path=%s err=%s", log_path, e)
         return None
+    logger.debug("read_progress path=%s size=%d tail=%d max_files=%s",
+                 log_path, size, len(data), max_files)
     text = data.decode("utf-8", errors="replace")
 
     # A job that was re-queued after a container restart will have multiple
@@ -52,10 +59,12 @@ def read_progress(log_path: str, max_files: Optional[int] = None) -> Optional[di
         percent = 100
     elif percent >= 100:
         percent = 99
-    return {
+    result = {
         "done": done,
         "downloaded": downloaded,
         "queued": queued,
         "total": total,
         "percent": percent,
     }
+    logger.debug("read_progress parsed path=%s result=%s", log_path, result)
+    return result

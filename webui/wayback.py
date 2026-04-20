@@ -51,7 +51,12 @@ def list_snapshots(url: str, from_year: Optional[int] = None, to_year: Optional[
     key = f"{url}|{from_year}|{to_year}|{limit}|{collapse_digits}"
     now = time.time()
     if key in _CACHE and now - _CACHE[key][0] < _TTL:
+        age = now - _CACHE[key][0]
+        logger.debug("cdx CACHE HIT url=%s age=%.1fs rows=%d ttl=%ds",
+                     url, age, len(_CACHE[key][1]), _TTL)
         return _CACHE[key][1]
+    logger.debug("cdx CACHE MISS url=%s from=%s to=%s limit=%d collapse=%d",
+                 url, from_year, to_year, limit, collapse_digits)
 
     params = {
         "url": url,
@@ -70,13 +75,22 @@ def list_snapshots(url: str, from_year: Optional[int] = None, to_year: Optional[
     req = urllib.request.Request(cdx, headers={"User-Agent": "Wayback-Archive-Dashboard/1.0"})
     last_err: Optional[Exception] = None
     for attempt in range(3):
+        t0 = time.monotonic()
+        logger.debug("cdx HTTP GET attempt=%d url=%s", attempt + 1, cdx)
         try:
             with urllib.request.urlopen(req, timeout=30) as r:
                 data = json.load(r)
+            dur_ms = (time.monotonic() - t0) * 1000
+            logger.debug("cdx HTTP OK attempt=%d rows=%s duration=%.1fms",
+                         attempt + 1,
+                         (len(data) - 1) if isinstance(data, list) and data else 0,
+                         dur_ms)
             break
         except Exception as e:
             last_err = e
-            logger.warning("cdx retry attempt=%d err=%s", attempt + 1, e)
+            dur_ms = (time.monotonic() - t0) * 1000
+            logger.warning("cdx retry attempt=%d err=%s (duration=%.1fms)",
+                           attempt + 1, e, dur_ms)
             time.sleep(1.5 * (attempt + 1))
     else:
         logger.error("wayback unreachable: %s", last_err)
@@ -90,4 +104,5 @@ def list_snapshots(url: str, from_year: Optional[int] = None, to_year: Optional[
         for row in data[1:]:
             out.append(dict(zip(header, row)))
     _CACHE[key] = (now, out)
+    logger.debug("cdx cached key=%r rows=%d", key, len(out))
     return out

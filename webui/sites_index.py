@@ -8,8 +8,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from . import jobs
+from . import jobs, log as _log
 from .safe_path import safe_output_child
+
+logger = _log.get("sites_index")
 
 INDEX_NAME = ".index.json"
 
@@ -70,9 +72,13 @@ def _measure(snapshot_dir: Path) -> dict:
     """Walk a snapshot dir; return {size_bytes, file_count, mtime, v}.
     A subdir vanishing mid-walk is tolerated — we keep the partial counts
     instead of throwing them away and returning {}."""
+    import time as _time
+    t0 = _time.monotonic()
+    logger.debug("measure start dir=%s", snapshot_dir)
     size = 0
     files = 0
     if not snapshot_dir.is_dir():
+        logger.debug("measure skip (not a dir) dir=%s", snapshot_dir)
         return {}
     stack: list[Path] = [snapshot_dir]
     while stack:
@@ -95,12 +101,17 @@ def _measure(snapshot_dir: Path) -> dict:
         mtime_iso = datetime.fromtimestamp(mtime, tz=timezone.utc).replace(microsecond=0).isoformat()
     except OSError:
         mtime_iso = None
+    dur_ms = (_time.monotonic() - t0) * 1000
+    logger.debug("measure done dir=%s files=%d size=%d mtime=%s duration=%.1fms",
+                 snapshot_dir, files, size, mtime_iso, dur_ms)
     return {"size_bytes": size, "file_count": files, "mtime": mtime_iso,
             "v": SNAPSHOT_VERSION}
 
 
 def refresh_index(host: str, timestamps: Optional[list[str]] = None) -> dict:
     """Refresh index entries for `timestamps` (or all snapshots if None)."""
+    logger.debug("refresh_index host=%s timestamps=%s",
+                 host, timestamps if timestamps else "<all>")
     try:
         host_dir = safe_output_child(host)
     except ValueError:
@@ -125,6 +136,9 @@ def refresh_index(host: str, timestamps: Optional[list[str]] = None) -> dict:
             changed = True
     if changed:
         _atomic_write(host, idx)
+        logger.debug("refresh_index host=%s wrote %d entries", host, len(idx))
+    else:
+        logger.debug("refresh_index host=%s no changes", host)
     return idx
 
 

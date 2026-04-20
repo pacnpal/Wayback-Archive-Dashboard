@@ -120,6 +120,9 @@ def probe_once(url: str = PROBE_URL, timeout: "float | None" = None) -> bool:
     if timeout is None:
         timeout = get_probe_timeout()
     req = urllib.request.Request(url, headers={"User-Agent": "Wayback-Archive-Dashboard/probe"})
+    import time as _time
+    start = _time.monotonic()
+    logger.debug("probe HTTP GET url=%s timeout=%ss (heartbeat)", url, timeout)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             status = getattr(r, "status", None)
@@ -128,9 +131,16 @@ def probe_once(url: str = PROBE_URL, timeout: "float | None" = None) -> bool:
                     status = r.getcode()
                 except Exception:
                     status = None
-            return status == 200
+            dur_ms = (_time.monotonic() - start) * 1000
+            ok = (status == 200)
+            logger.debug(
+                "probe HTTP response status=%s ok=%s duration=%.1fms",
+                status, ok, dur_ms,
+            )
+            return ok
     except (urllib.error.URLError, TimeoutError, OSError) as e:
-        logger.debug("probe fail: %s", e)
+        dur_ms = (_time.monotonic() - start) * 1000
+        logger.debug("probe fail: %s (duration=%.1fms)", e, dur_ms)
         return False
 
 
@@ -275,13 +285,30 @@ async def probe_loop(stop: asyncio.Event) -> None:
     initial = load_state()
     logger.info("probe loop start state=%s fails=%d ok=%d",
                 initial.state, initial.consecutive_fails, initial.consecutive_ok)
+    logger.debug(
+        "probe loop config interval=%ss jitter=±%ss fail_threshold=%d "
+        "ok_threshold=%d probe_url=%s",
+        PROBE_INTERVAL, PROBE_JITTER, FAIL_THRESHOLD, OK_THRESHOLD, PROBE_URL,
+    )
+    tick = 0
     while not stop.is_set():
+        tick += 1
         # Reload each iteration so a concurrent manual retry (which
         # writes to the same settings keys) can't be clobbered by a
         # stale in-memory counter. Cheap single-row SELECT.
         state = load_state()
+        logger.debug(
+            "probe tick=%d heartbeat start state=%s fails=%d ok=%d",
+            tick, state.state, state.consecutive_fails, state.consecutive_ok,
+        )
         ok = await asyncio.to_thread(probe_once)
         flipped = state.observe(ok)
+        logger.debug(
+            "probe tick=%d result ok=%s state=%s fails=%d ok_streak=%d "
+            "flipped=%s",
+            tick, ok, state.state, state.consecutive_fails,
+            state.consecutive_ok, flipped,
+        )
         if flipped:
             logger.warning("wayback state flip -> %s (fails=%d ok=%d)",
                            flipped, state.consecutive_fails, state.consecutive_ok)
@@ -292,12 +319,18 @@ async def probe_loop(stop: asyncio.Event) -> None:
                 released = jobs.release_deferred()
                 if released:
                     logger.info("released %d deferred jobs", released)
+                else:
+                    logger.debug("no deferred jobs to release on flip->up")
         else:
             # Persist counters even without a flip so the dashboard
             # shows accurate fail/ok streaks.
             save_state(state)
+            logger.debug("probe tick=%d persisted counters (no flip)", tick)
         delay = PROBE_INTERVAL + random.uniform(-PROBE_JITTER, PROBE_JITTER)
+        logger.debug("probe tick=%d sleeping %.1fs until next heartbeat",
+                     tick, delay)
         try:
             await asyncio.wait_for(stop.wait(), timeout=delay)
         except asyncio.TimeoutError:
             pass
+    logger.debug("probe loop exit after tick=%d (stop event set)", tick)

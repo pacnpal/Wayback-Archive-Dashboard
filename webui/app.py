@@ -25,17 +25,34 @@ BASE = Path(__file__).parent
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log_mod.configure()
+    boot = log_mod.get("app")
+    boot.info("startup version=%s output=%s", APP_VERSION, jobs.OUTPUT_ROOT)
+    if log_mod.is_debug():
+        redacted = {
+            k: ("<set>" if v else "<empty>")
+            for k, v in os.environ.items()
+            if k.startswith(("WAYBACK_", "OPTIMIZE_", "REMOVE_", "MINIFY_",
+                             "MAKE_", "KEEP_", "USE_", "MAX_", "FETCH_",
+                             "LOG_LEVEL", "OUTPUT_DIR", "APP_VERSION"))
+        }
+        boot.debug("boot env (selected keys): %s", redacted)
+        boot.debug("DB path=%s", jobs.DB_PATH)
     jobs.init_db()
+    boot.debug("db initialized — starting worker/scheduler/progress/probe tasks")
     stop = asyncio.Event()
     t1 = asyncio.create_task(jobs.worker_loop(stop))
     t2 = asyncio.create_task(scheduler.scheduler_loop(stop))
     t3 = asyncio.create_task(_progress_logger(stop))
     t4 = asyncio.create_task(wayback_probe.probe_loop(stop))
+    boot.debug("background tasks launched: worker=%s scheduler=%s progress=%s probe=%s",
+               t1.get_name(), t2.get_name(), t3.get_name(), t4.get_name())
     try:
         yield
     finally:
+        boot.info("shutdown signaling stop event")
         stop.set()
         await asyncio.gather(t1, t2, t3, t4, return_exceptions=True)
+        boot.debug("shutdown all background tasks joined")
 
 
 async def _progress_logger(stop: _asyncio.Event) -> None:
@@ -43,13 +60,17 @@ async def _progress_logger(stop: _asyncio.Event) -> None:
     SSE event so connected clients re-fetch the jobs tbody (keeps the
     progress bars updating)."""
     lg = log_mod.get("progress")
+    tick = 0
+    lg.debug("progress logger start interval=10s")
     while not stop.is_set():
+        tick += 1
         try:
             with jobs.connect() as c:
                 rows = c.execute(
                     "SELECT id, host, timestamp, log_path, flags_json "
                     "FROM jobs WHERE status='running' ORDER BY id"
                 ).fetchall()
+            lg.debug("progress tick=%d heartbeat running=%d", tick, len(rows))
             if rows:
                 events_bus.publish("jobs-changed")
                 for r in rows:
@@ -69,12 +90,21 @@ async def _progress_logger(stop: _asyncio.Event) -> None:
                             p["downloaded"], p["queued"],
                             p["total"] or "?", p["percent"],
                         )
+                        lg.debug(
+                            "job=%d parsed log_path=%s max_files=%s done=%s "
+                            "raw=%s", r["id"], r["log_path"], mf, p.get("done"),
+                            p,
+                        )
+            else:
+                lg.debug("progress tick=%d idle (no running jobs)", tick)
         except Exception as e:
             lg.warning("progress tick failed: %s", e)
+        lg.debug("progress tick=%d sleeping 10s", tick)
         try:
             await _asyncio.wait_for(stop.wait(), timeout=10.0)
         except _asyncio.TimeoutError:
             pass
+    lg.debug("progress logger exit after tick=%d", tick)
 
 
 app = FastAPI(title="Wayback Archive Dashboard", lifespan=lifespan)
@@ -82,6 +112,40 @@ app.state.version = APP_VERSION
 app.state.github_url = GITHUB_URL
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 app.mount("/archives", StaticFiles(directory=jobs.OUTPUT_ROOT, html=True), name="archives")
+
+
+@app.middleware("http")
+async def _debug_http_trace(request, call_next):
+    """At DEBUG, log every HTTP request with method/path/query, headers of
+    interest, duration, and response status. Silent at INFO."""
+    if not log_mod.is_debug():
+        return await call_next(request)
+    import time as _time
+    lg = log_mod.get("http")
+    t0 = _time.monotonic()
+    peer = request.client.host if request.client else "?"
+    ua = request.headers.get("user-agent", "-")
+    hx = request.headers.get("hx-request", "-")
+    lg.debug(
+        "HTTP IN method=%s path=%s query=%r peer=%s ua=%r hx-request=%s",
+        request.method, request.url.path, str(request.url.query),
+        peer, ua, hx,
+    )
+    try:
+        response = await call_next(request)
+    except Exception as e:
+        dur_ms = (_time.monotonic() - t0) * 1000
+        lg.debug(
+            "HTTP ERR method=%s path=%s peer=%s duration=%.1fms exc=%r",
+            request.method, request.url.path, peer, dur_ms, e,
+        )
+        raise
+    dur_ms = (_time.monotonic() - t0) * 1000
+    lg.debug(
+        "HTTP OUT method=%s path=%s peer=%s status=%s duration=%.1fms",
+        request.method, request.url.path, peer, response.status_code, dur_ms,
+    )
+    return response
 
 @app.get("/web/{rest:path}")
 async def wayback_local(rest: str):
