@@ -109,8 +109,9 @@
   </ul>
 </nav>
 <div id="wayback-banner-slot"
+     hx-sse:connect="/events"
      hx-get="/api/wayback-status"
-     hx-trigger="load, every 30s, wayback-state-changed from:body"
+     hx-trigger="load, every 30s, sse:wayback-state-changed"
      hx-swap="innerHTML"></div>
 <main>{% block content %}{% endblock %}</main>
 <footer style="margin:2rem 0 1rem;padding-top:.8rem;border-top:1px solid var(--pico-muted-border-color);display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;font-size:.78rem;color:var(--pico-muted-color)">

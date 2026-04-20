@@ -371,13 +371,20 @@ def defer_for_outage(job_id: int, now: Optional[datetime] = None) -> None:
 
 
 def earliest_deferred_not_before() -> Optional[str]:
-    """ISO timestamp of the soonest upcoming deferred-job retry, or None
-    if no pending jobs have a ``not_before`` set."""
+    """ISO timestamp of the soonest *future* deferred-job retry, or None
+    if no pending jobs have a ``not_before`` still in the future.
+
+    Past-due deferrals are excluded because during an outage the worker
+    gate holds them back even after their timer elapses — showing the
+    banner a stale/past timestamp would make the ETA render as
+    "any moment now" perpetually while nothing is actually running."""
+    now = now_iso()
     with connect() as c:
         row = c.execute(
             "SELECT MIN(not_before) AS nb FROM jobs "
             "WHERE status='pending' AND not_before IS NOT NULL "
-            "AND not_before > CURRENT_TIMESTAMP"
+            "AND not_before > ?",
+            (now,),
         ).fetchone()
     return row["nb"] if row and row["nb"] else None
 
@@ -545,7 +552,8 @@ async def _run_one(job: sqlite3.Row) -> None:
     # If the job failed and the probe says CDX is down, this is almost
     # certainly an outage, not a real content failure. Defer instead of
     # going terminal; release_deferred() or the elapsed not_before will
-    # retry us when IA comes back.
+    # retry us when IA comes back. defer_for_outage publishes the SSE
+    # event itself, so don't double-publish here.
     if status == "error":
         try:
             from . import wayback_probe
@@ -554,7 +562,6 @@ async def _run_one(job: sqlite3.Row) -> None:
                 dur = time.monotonic() - start_time
                 logger.info("deferred job=%d duration=%.1fs rc=%s (wayback down)",
                             job["id"], dur, rc)
-                events_bus.publish("jobs-changed")
                 return
         except Exception as e:
             logger.warning("defer check failed job=%d err=%s", job["id"], e)

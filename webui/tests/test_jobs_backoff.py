@@ -123,6 +123,22 @@ def test_release_deferred_clears_not_before(jobs_db):
     assert normal_row["not_before"] is None
 
 
+def test_earliest_deferred_not_before_returns_future_only(jobs_db):
+    past = (datetime.now(timezone.utc) - timedelta(minutes=5)).replace(microsecond=0).isoformat()
+    future = (datetime.now(timezone.utc) + timedelta(hours=1)).replace(microsecond=0).isoformat()
+    _insert_pending(jobs_db, not_before=past)
+    _insert_pending(jobs_db, not_before=future)
+    assert jobs_db.earliest_deferred_not_before() == future
+
+
+def test_earliest_deferred_not_before_none_when_all_past(jobs_db):
+    """Past-due deferrals are filtered out so the banner doesn't render
+    a misleading 'any moment now' ETA during a sustained outage."""
+    past = (datetime.now(timezone.utc) - timedelta(minutes=5)).replace(microsecond=0).isoformat()
+    _insert_pending(jobs_db, not_before=past)
+    assert jobs_db.earliest_deferred_not_before() is None
+
+
 def test_release_deferred_only_touches_pending_jobs(jobs_db):
     future = (datetime.now(timezone.utc) + timedelta(hours=6)).replace(microsecond=0).isoformat()
     jid_done = _insert_pending(jobs_db, status="error", not_before=future,

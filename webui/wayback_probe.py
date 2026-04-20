@@ -3,14 +3,14 @@
 Runs a cheap CDX query on a schedule and tracks up/down state with
 hysteresis so a single blip doesn't pause the worker. When CDX is down,
 ``webui.jobs.worker_loop`` stops popping new work; in-flight jobs that
-fail during the outage are rescheduled using the ``_BACKOFF_MINUTES``
-sequence (5m, 10m, 15m, 20m, 30m, 45m, 60m, 120m, 240m, 480m, 960m,
-capping at 24h). When CDX comes back up, deferred jobs are released in
-one pass.
+fail during the outage are rescheduled with an escalating backoff
+(5/10/15/20/30/45/60/120 min, then doubling 240/480/960, capped at 24h).
+When CDX comes back up, deferred jobs are released in one pass.
 
-State lives in the ``settings`` table (``wayback_state``,
-``wayback_state_since``) so it survives restarts and is visible to the
-dashboard.
+State lives in the ``settings`` table under the keys
+``wayback_probe_state`` (JSON with ``state``/``consecutive_fails``/
+``consecutive_ok``) and ``wayback_state_since`` (ISO timestamp of the
+last flip). It survives restarts and is visible to the dashboard banner.
 """
 from __future__ import annotations
 import asyncio
@@ -18,7 +18,6 @@ import dataclasses
 import json
 import random
 import urllib.error
-import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from typing import Optional
@@ -194,10 +193,14 @@ def get_status() -> dict:
 
 
 async def probe_loop(stop: asyncio.Event) -> None:
-    state = load_state()
+    initial = load_state()
     logger.info("probe loop start state=%s fails=%d ok=%d",
-                state.state, state.consecutive_fails, state.consecutive_ok)
+                initial.state, initial.consecutive_fails, initial.consecutive_ok)
     while not stop.is_set():
+        # Reload each iteration so a concurrent manual retry (which
+        # writes to the same settings keys) can't be clobbered by a
+        # stale in-memory counter. Cheap single-row SELECT.
+        state = load_state()
         ok = await asyncio.to_thread(probe_once)
         flipped = state.observe(ok)
         if flipped:

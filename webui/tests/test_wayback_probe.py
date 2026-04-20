@@ -118,6 +118,37 @@ def test_manual_retry_failing_does_not_bump_consecutive_fails(probe_db, monkeypa
     assert snap.get("flipped_to") is None
 
 
+def test_probe_loop_reloads_state_each_iteration(probe_db, monkeypatch):
+    """Regression: the loop used to cache `state` in a local variable
+    for its lifetime, so a manual retry's write could be clobbered by
+    the next scheduled save. Verify one iteration reads fresh state."""
+    import asyncio
+    wp, _ = probe_db
+    # Start with state=up. Between iterations, something else writes
+    # state=down to the DB — the next loop tick must respect it, not
+    # save a stale "up" back on top.
+    wp.save_state(wp.ProbeState(state="up"))
+    monkeypatch.setattr(wp, "probe_once", lambda *a, **kw: False)
+
+    # Simulate an external mutation (manual retry would do this).
+    wp.save_state(wp.ProbeState(state="down", consecutive_fails=3))
+
+    # Drive exactly one iteration: run probe_loop briefly, then stop.
+    async def driver():
+        stop = asyncio.Event()
+        task = asyncio.create_task(wp.probe_loop(stop))
+        await asyncio.sleep(0.05)
+        stop.set()
+        await task
+
+    asyncio.run(driver())
+    # The loop observed False against the RELOADED state (which was
+    # already 'down'), so state stays down with fails incremented.
+    after = wp.load_state()
+    assert after.state == "down"
+    assert after.consecutive_fails == 4  # 3 + this probe
+
+
 def test_manual_retry_success_can_flip_up_and_release(probe_db, monkeypatch):
     wp, jobs_mod = probe_db
     # Seed state=down with one prior ok (so 1 more ok flips us up), plus
