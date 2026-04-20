@@ -67,9 +67,22 @@ def test_set_probe_timeout_endpoint_persists_value(client):
 
 def test_set_probe_timeout_endpoint_clamps_out_of_range(client):
     c, wp, _ = client
-    c.post("/settings/wayback-probe-timeout", data={"timeout": "9999"},
-           follow_redirects=False)
+    r = c.post("/settings/wayback-probe-timeout", data={"timeout": "9999"},
+               follow_redirects=False)
+    assert r.status_code in (303, 307)
     assert wp.get_probe_timeout() == wp.PROBE_TIMEOUT_MAX
+
+
+def test_set_probe_timeout_endpoint_handles_empty_and_garbage(client):
+    """Route forwards raw form values; set_probe_timeout must tolerate
+    empty strings and non-numeric garbage without 500ing the endpoint
+    (the old route caught only ValueError, missed TypeError)."""
+    c, wp, _ = client
+    for val in ("", "abc", "nine seconds"):
+        r = c.post("/settings/wayback-probe-timeout", data={"timeout": val},
+                   follow_redirects=False)
+        assert r.status_code in (303, 307), f"failed for input={val!r}"
+        assert wp.get_probe_timeout() == wp.PROBE_TIMEOUT
 
 
 def test_banner_handles_naive_since_timestamp(client):

@@ -85,20 +85,19 @@ def get_probe_timeout() -> float:
     return max(PROBE_TIMEOUT_MIN, min(PROBE_TIMEOUT_MAX, v))
 
 
-def set_probe_timeout(seconds: float) -> float:
-    """Persist ``seconds`` after clamping. Returns the value actually written."""
+def set_probe_timeout(seconds) -> float:
+    """Persist ``seconds`` after clamping. Accepts any stringish/numeric
+    input (route handler forwards the raw form value); falls back to
+    ``PROBE_TIMEOUT`` on garbage, then clamps to
+    ``[PROBE_TIMEOUT_MIN, PROBE_TIMEOUT_MAX]``. Returns the value
+    actually written."""
     from . import jobs
     try:
-        v = float(seconds)
+        v = float(seconds) if seconds is not None and seconds != "" else PROBE_TIMEOUT
     except (TypeError, ValueError):
         v = PROBE_TIMEOUT
     bounded = max(PROBE_TIMEOUT_MIN, min(PROBE_TIMEOUT_MAX, v))
-    with jobs.connect() as c:
-        c.execute(
-            "INSERT INTO settings(key,value) VALUES(?,?) "
-            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            ("wayback_probe_timeout", str(bounded)),
-        )
+    jobs.set_setting("wayback_probe_timeout", str(bounded))
     return bounded
 
 

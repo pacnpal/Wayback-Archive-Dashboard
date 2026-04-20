@@ -209,11 +209,9 @@ async def set_max_concurrent(request: Request):
 @router.post("/settings/wayback-probe-timeout")
 async def set_wayback_probe_timeout(request: Request):
     form = await request.form()
-    try:
-        v = float(form.get("timeout") or wayback_probe.PROBE_TIMEOUT)
-    except ValueError:
-        v = wayback_probe.PROBE_TIMEOUT
-    wayback_probe.set_probe_timeout(v)
+    # set_probe_timeout handles None/empty/non-numeric/out-of-range on
+    # its own — the route just forwards the raw form value.
+    wayback_probe.set_probe_timeout(form.get("timeout"))
     return RedirectResponse("/", status_code=303)
 
 
