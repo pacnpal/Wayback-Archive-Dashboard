@@ -79,14 +79,11 @@ def get_probe_timeout() -> int:
     ``[PROBE_TIMEOUT_MIN, PROBE_TIMEOUT_MAX]``. Integer so the UI input
     round-trips cleanly."""
     from . import jobs
-    with jobs.connect() as c:
-        row = c.execute(
-            "SELECT value FROM settings WHERE key='wayback_probe_timeout'"
-        ).fetchone()
-    if not row or row["value"] is None:
+    raw = jobs.get_setting("wayback_probe_timeout", "")
+    if not raw:
         return PROBE_TIMEOUT
     try:
-        v = float(row["value"])
+        v = float(raw)
     except (TypeError, ValueError):
         return PROBE_TIMEOUT
     if not math.isfinite(v):

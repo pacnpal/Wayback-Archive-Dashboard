@@ -62,7 +62,12 @@ def test_set_probe_timeout_endpoint_persists_value(client):
     r = c.post("/settings/wayback-probe-timeout", data={"timeout": "45"},
                follow_redirects=False)
     assert r.status_code in (303, 307)
-    assert wp.get_probe_timeout() == 45.0
+    got = wp.get_probe_timeout()
+    # Function is typed -> int; asserting against the int literal (not
+    # 45.0) catches a type regression that would otherwise pass because
+    # 45 == 45.0 in Python.
+    assert got == 45
+    assert isinstance(got, int)
 
 
 def test_set_probe_timeout_endpoint_clamps_out_of_range(client):
@@ -70,7 +75,9 @@ def test_set_probe_timeout_endpoint_clamps_out_of_range(client):
     r = c.post("/settings/wayback-probe-timeout", data={"timeout": "9999"},
                follow_redirects=False)
     assert r.status_code in (303, 307)
-    assert wp.get_probe_timeout() == wp.PROBE_TIMEOUT_MAX
+    got = wp.get_probe_timeout()
+    assert got == wp.PROBE_TIMEOUT_MAX
+    assert isinstance(got, int)
 
 
 def test_set_probe_timeout_endpoint_handles_empty_and_garbage(client):
