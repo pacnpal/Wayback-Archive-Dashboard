@@ -224,7 +224,7 @@ def test_block_tier_caps_at_seven_days(rl_env, monkeypatch):
     """The doubling is real but must not run off into months."""
     rl, _, _ = rl_env
     # Force high-tier directly in the DB then observe a new 429.
-    with rl._connect() as c:
+    with rl._conn() as c:
         rl._ensure_schema(c)
         c.execute("BEGIN IMMEDIATE")
         rl._set(c, "cdx_block_tier", "30")
@@ -244,7 +244,7 @@ def test_tier_decays_after_24h_idle(rl_env, monkeypatch):
     rl, _, _ = rl_env
     from datetime import datetime, timedelta, timezone
     old = (datetime.now(timezone.utc) - timedelta(hours=36)).replace(microsecond=0).isoformat()
-    with rl._connect() as c:
+    with rl._conn() as c:
         rl._ensure_schema(c)
         c.execute("BEGIN IMMEDIATE")
         rl._set(c, "cdx_block_tier", "5")

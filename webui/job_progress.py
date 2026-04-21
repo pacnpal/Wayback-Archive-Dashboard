@@ -59,12 +59,24 @@ def read_progress(log_path: str, max_files: Optional[int] = None) -> Optional[di
         percent = 100
     elif percent >= 100:
         percent = 99
+    # Surface the log's mtime as a "last activity" signal so the
+    # dashboard can distinguish a healthily-slow job (upstream chewing
+    # through failing URLs, each taking ~15 s) from a genuinely wedged
+    # one (subprocess in unrecoverable sleep, no log writes for many
+    # minutes). We return the mtime as a Unix timestamp; the UI
+    # converts to relative ("12s ago" / "6m ago") and applies a
+    # staleness threshold for the visual warning.
+    try:
+        last_activity = int(p.stat().st_mtime)
+    except OSError:
+        last_activity = 0
     result = {
         "done": done,
         "downloaded": downloaded,
         "queued": queued,
         "total": total,
         "percent": percent,
+        "last_activity": last_activity,
     }
     logger.debug("read_progress parsed path=%s result=%s", log_path, result)
     return result

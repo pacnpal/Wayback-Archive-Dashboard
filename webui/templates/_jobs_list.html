@@ -98,6 +98,12 @@
           {% set p = progress[j.id] %}
           <div><small>{{ p.downloaded }}{% if p.total %}/{{ p.total }}{% endif %} · {{ p.percent }}%</small></div>
           <div class="progress-bar"><span style="width:{{p.percent}}%"></span></div>
+          {% if p.last_activity %}
+            <div class="activity-line">
+              <span class="activity-dot" data-last-activity="{{ p.last_activity }}"></span>
+              <small data-last-activity-ago="{{ p.last_activity }}">…</small>
+            </div>
+          {% endif %}
         {% endif %}
       </td>
       <td class="mono ts-cell">{% if j.started_at %}{{ j.started_at[0:10] }}<br>{{ j.started_at[11:19] }}{% else %}—{% endif %}</td>

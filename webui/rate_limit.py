@@ -102,9 +102,10 @@ class RateLimitTimeout(RuntimeError):
     """``acquire()`` waited ``ACQUIRE_TIMEOUT_SECONDS`` without a slot."""
 
 
-def _connect() -> sqlite3.Connection:
-    # Imported here to avoid a circular at import time — jobs imports
-    # wayback which imports rate_limit.
+def _conn():
+    """Yield a closing-safe dashboard DB connection. Deferred import
+    avoids a circular at module-load time (``jobs`` imports
+    ``wayback`` which imports ``rate_limit``)."""
     from . import jobs
     return jobs.connect()
 
@@ -163,7 +164,7 @@ def _block_until(c: sqlite3.Connection) -> Optional[datetime]:
 def is_blocked() -> bool:
     """Hard-block gate: True iff a 429-driven cooldown is still in
     the future. Fast path — single SELECT."""
-    with _connect() as c:
+    with _conn() as c:
         _ensure_schema(c)
         bu = _block_until(c)
     return bool(bu and bu > _now_utc())
@@ -172,7 +173,7 @@ def is_blocked() -> bool:
 def block_remaining_seconds() -> Optional[int]:
     """Seconds left in the current hard block, or None if not
     blocked. UI/logging convenience."""
-    with _connect() as c:
+    with _conn() as c:
         _ensure_schema(c)
         bu = _block_until(c)
     if not bu:
@@ -183,7 +184,7 @@ def block_remaining_seconds() -> Optional[int]:
 
 def get_status() -> dict:
     """Snapshot for the dashboard banner + operator logs."""
-    with _connect() as c:
+    with _conn() as c:
         _ensure_schema(c)
         bu = _block_until(c)
         tier_raw = _get(c, "cdx_block_tier") or "0"
@@ -221,7 +222,7 @@ def acquire(timeout: float = ACQUIRE_TIMEOUT_SECONDS) -> None:
     while True:
         now_wall = time.time()
         try:
-            with _connect() as c:
+            with _conn() as c:
                 _ensure_schema(c)
                 # BEGIN IMMEDIATE grabs the write lock before anyone
                 # else can race past our count. SQLite serializes
@@ -349,7 +350,7 @@ def observe_429(retry_after_seconds: Optional[float] = None) -> int:
     """Record a CDX 429 (or explicit Retry-After) and install a hard
     block. Returns the block duration in seconds. Safe to call from
     any thread or subprocess — write is atomic."""
-    with _connect() as c:
+    with _conn() as c:
         _ensure_schema(c)
         c.execute("BEGIN IMMEDIATE")
         try:
@@ -391,7 +392,7 @@ def observe_ok() -> None:
     expired, and decays the tier if it's been at least
     ``_TIER_DECAY_SECONDS`` since the last 429."""
     changed = False
-    with _connect() as c:
+    with _conn() as c:
         _ensure_schema(c)
         c.execute("BEGIN IMMEDIATE")
         try:

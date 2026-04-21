@@ -83,6 +83,21 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   .progress-bar { height: 4px; background: var(--pico-muted-border-color); border-radius: 2px; margin-top: 2px; overflow: hidden; }
   .progress-bar span { display: block; height: 100%; background: #2a9d8f; transition: width .3s; }
+  /* Live-activity indicator. Dot color encodes staleness of the last
+     log write; small text shows relative "Xs ago". Updated every
+     second by the activity-ticker in base.html. Three bands:
+       fresh    (< 60s)    — green, faint pulse
+       slow     (1–5m)     — amber, no pulse (upstream is chewing through
+                              timeouts or waiting on the rate gate)
+       stalled  (> 5m)     — red, no pulse (probably wedged) */
+  .activity-line { display: flex; align-items: center; gap: .3rem; margin-top: 3px; }
+  .activity-dot { display: inline-block; width: .55rem; height: .55rem; border-radius: 50%; background: #888; transition: background .3s; flex-shrink: 0; }
+  .activity-dot.activity-fresh { background: #2a9d8f; animation: activityPulse 2s ease-in-out infinite; }
+  .activity-dot.activity-slow  { background: #d97706; }
+  .activity-dot.activity-stalled { background: #c62828; }
+  .activity-line small { font-size: .72rem; color: var(--pico-muted-color); }
+  .activity-line small.activity-stalled { color: #c62828; font-weight: 600; }
+  @keyframes activityPulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
   .mono, code, pre { font-family: ui-monospace, monospace; }
   pre.log { max-height: 300px; overflow: auto; background: #111; color: #ddd; padding: .5rem; }
   .tree { font-family: ui-monospace, monospace; line-height: 1.6; }
@@ -197,6 +212,44 @@
       setTimeout(() => { firedRefresh = false; }, 5000);
     }
     if (nodes.length === 0) firedRefresh = false;
+  }, 1000);
+})();
+
+// Activity ticker: every second, update [data-last-activity]
+// elements with a color-coded "staleness" band and the sibling
+// [data-last-activity-ago] with relative-time text ("12s ago",
+// "6m ago"). Lets users distinguish a healthily-slow job (fresh
+// dot, even if progress bar barely moves) from a wedged one
+// (red dot + "stalled 11m").
+(function setupActivityTicker() {
+  const FRESH_S = 60;
+  const SLOW_S = 5 * 60;
+  function fmt(secs) {
+    if (secs < 60) return `${secs}s ago`;
+    if (secs < 3600) return `${Math.floor(secs / 60)}m ${secs % 60}s ago`;
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    return `${h}h ${m}m ago`;
+  }
+  setInterval(() => {
+    const nowS = Math.floor(Date.now() / 1000);
+    document.querySelectorAll('[data-last-activity]').forEach(dot => {
+      const last = parseInt(dot.dataset.lastActivity, 10);
+      if (!last) return;
+      const ago = Math.max(0, nowS - last);
+      dot.classList.remove('activity-fresh', 'activity-slow', 'activity-stalled');
+      if (ago < FRESH_S) dot.classList.add('activity-fresh');
+      else if (ago < SLOW_S) dot.classList.add('activity-slow');
+      else dot.classList.add('activity-stalled');
+      dot.title = `last log write ${fmt(ago)}`;
+    });
+    document.querySelectorAll('[data-last-activity-ago]').forEach(el => {
+      const last = parseInt(el.dataset.lastActivityAgo, 10);
+      if (!last) return;
+      const ago = Math.max(0, nowS - last);
+      el.textContent = fmt(ago);
+      el.classList.toggle('activity-stalled', ago >= SLOW_S);
+    });
   }, 1000);
 })();
 

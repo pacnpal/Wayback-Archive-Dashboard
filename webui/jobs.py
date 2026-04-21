@@ -1,6 +1,7 @@
 """Job queue (SQLite) + subprocess runner for wayback_archive CLI."""
 from __future__ import annotations
 import asyncio
+import contextlib
 import json
 import os
 import re
@@ -10,7 +11,7 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Iterator, Optional
 
 # Lines emitted by webui.wayback_resume_shim's logger already start with an
 # ISO8601 timestamp (its fmt is "%(asctime)s ... " with datefmt
@@ -19,7 +20,25 @@ _TS_LINE_RE = re.compile(rb"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z?\s")
 
 from . import wayback
 
-OUTPUT_ROOT = Path(os.environ.get("OUTPUT_DIR", "/app/output"))
+# OUTPUT_ROOT is where the dashboard *itself* keeps its SQLite state —
+# it must NOT shift when this module is imported inside a shim
+# subprocess (where the parent has rewritten ``OUTPUT_DIR`` to
+# ``<site_dir>`` so the shim writes archived files there). Use
+# ``DASHBOARD_ROOT`` first so every process agrees on which DB to
+# open; fall back to ``OUTPUT_DIR`` so single-process runs (tests,
+# first-time launches before the env var is set) still work.
+#
+# Bug class this fixes: before v0.4.3 the rate-limit gate opened
+# ``.dashboard.db`` inside each shim's ``<site_dir>``. Each
+# subprocess got its own isolated gate, the main dashboard's DB had
+# zero rate-limit events, and every ``acquire()`` call leaked its
+# two SQLite FDs (Python's ``with sqlite3.Connection:`` commits the
+# transaction but doesn't close the connection). Subprocesses
+# accumulated thousands of open FDs per run.
+OUTPUT_ROOT = Path(
+    os.environ.get("DASHBOARD_ROOT")
+    or os.environ.get("OUTPUT_DIR", "/app/output")
+)
 DB_PATH = OUTPUT_ROOT / ".dashboard.db"
 
 
@@ -68,12 +87,35 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
-def connect() -> sqlite3.Connection:
+@contextlib.contextmanager
+def connect() -> Iterator[sqlite3.Connection]:
+    """Context manager yielding a SQLite connection that CLOSES on
+    exit.
+
+    Python's ``with sqlite3.Connection`` only commits/rolls-back the
+    transaction; it does NOT close the connection. Before v0.4.3
+    every ``with connect() as c:`` call site here was relying on
+    garbage collection to eventually close the connection, which
+    meant that under load (hot paths like the worker loop, the
+    progress logger, rate_limit.acquire inside shim subprocesses)
+    SQLite FDs accumulated faster than the GC could reclaim them —
+    shim subprocesses were hitting 3000+ open FDs per run.
+
+    The inner ``with conn:`` preserves the existing auto-commit
+    semantics that every caller here depends on; the outer
+    try/finally guarantees ``conn.close()`` even if the caller
+    leaves a pending explicit transaction (the ``BEGIN IMMEDIATE``
+    pattern in rate_limit) or raises mid-block.
+    """
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, isolation_level=None)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
-    return conn
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 def init_db() -> None:
@@ -636,6 +678,11 @@ async def _run_one(job: sqlite3.Row) -> None:
     env = os.environ.copy()
     env["WAYBACK_URL"] = job["wayback_url"]
     env["OUTPUT_DIR"] = job["site_dir"]
+    # Preserve the dashboard's actual output root so ``webui.jobs``
+    # inside the shim subprocess opens the shared rate-limit DB at
+    # the right path — without this, ``OUTPUT_DIR=<site_dir>`` above
+    # makes each shim see its own isolated .dashboard.db.
+    env["DASHBOARD_ROOT"] = str(OUTPUT_ROOT)
     # Flip upstream defaults that change the archived bytes: keep host
     # formatting (no www./non-www. rewrite) and preserve raw HTML formatting
     # unless the user explicitly opts in via flags_json.
