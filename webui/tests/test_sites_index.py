@@ -27,7 +27,7 @@ def test_measure_counts_every_file_in_tree(tmp_path, monkeypatch):
     _write(snap / "img" / "a.png", b"GIF89a" * 10)   # 60 B
     _write(snap / ".log", b"job log " * 100)         # 800 B (job sidecar still counts)
 
-    m = sites_index._measure(snap)
+    m = sites_index._measure_host_snapshot("example.com", "20240101000000")
     assert m["file_count"] == 3
     assert m["size_bytes"] == 13 + 60 + 800
     assert m["v"] == sites_index.SNAPSHOT_VERSION
@@ -84,7 +84,7 @@ def test_get_index_serves_cache_when_nothing_changed(tmp_path, monkeypatch):
     _write(snap / "index.html", b"hi")
 
     sites_index.get_index("example.com")  # populate cache
-    sites_index._measure = lambda *_a, **_kw: (_ for _ in ()).throw(
+    sites_index._measure_host_snapshot = lambda *_a, **_kw: (_ for _ in ()).throw(
         AssertionError("re-measure of an unchanged snapshot")
     )
     try:
@@ -94,3 +94,17 @@ def test_get_index_serves_cache_when_nothing_changed(tmp_path, monkeypatch):
         from importlib import reload
         reload(sites_index)
     assert idx["20240101000000"]["file_count"] == 1
+
+
+def test_path_escape_via_host_returns_empty(tmp_path, monkeypatch):
+    """A host string containing `..` segments must not let path
+    operations reach outside OUTPUT_ROOT. Each sink enforces the
+    barrier inline so there's no way to slip past."""
+    monkeypatch.setattr(jobs, "OUTPUT_ROOT", tmp_path)
+    # Even if a caller skipped safe_output_child validation and passed
+    # raw traversal-laden strings, every sink returns empty/false.
+    assert sites_index.get_index("../etc") == {}
+    assert sites_index._measure_host_snapshot("../etc", "20240101000000") == {}
+    assert sites_index._snapshot_is_dir("../etc", "20240101000000") is False
+    assert sites_index._snapshot_mtime_iso("../etc", "20240101000000") is None
+    assert sites_index._list_snapshot_ts("../etc") == []

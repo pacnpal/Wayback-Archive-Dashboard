@@ -1,4 +1,17 @@
-"""On-disk metadata cache for per-host snapshot directories."""
+"""On-disk metadata cache for per-host snapshot directories.
+
+CodeQL's path-injection taint tracker only recognizes the
+``resolve() → is_relative_to(base)`` barrier when both operations
+appear in the same scope as the filesystem sink. Helper functions
+that take or return ``Path`` objects break that pattern: the analyzer
+sees tainted data cross the function boundary and re-flags each sink.
+
+Every filesystem operation in this module therefore inlines the
+barrier immediately before the sink — no helper indirection, no
+``Path`` parameters passed between functions. Callers supply raw
+``host`` / ``ts`` strings; each function resolves, checks the
+barrier, then acts. It's repetitive but CodeQL-clean.
+"""
 from __future__ import annotations
 import json
 import os
@@ -9,29 +22,9 @@ from pathlib import Path
 from typing import Optional
 
 from . import jobs, log as _log
-from .safe_path import safe_output_child
 
 logger = _log.get("sites_index")
 
-
-def _under_root(p: Path) -> Optional[Path]:
-    """Barrier: resolve ``p`` and confirm it lies within OUTPUT_ROOT.
-    Returns the resolved path on success, None on escape.
-
-    ``safe_output_child`` already acts as a barrier, but CodeQL loses the
-    sanitizer tag across ``str(path)`` and ``tempfile.mkstemp``'s return
-    value — mkstemp's output is a fresh string derived from the tainted
-    ``dir=`` arg, so static analysis re-taints the flow. Re-checking
-    inline at each filesystem sink makes the barrier visible to the
-    analyzer and is cheap defense-in-depth at runtime."""
-    try:
-        rp = p.resolve()
-    except OSError:
-        return None
-    base = jobs.OUTPUT_ROOT.resolve()
-    if not rp.is_relative_to(base):
-        return None
-    return rp
 
 INDEX_NAME = ".index.json"
 
@@ -51,16 +44,16 @@ def is_snapshot_ts(name: str) -> bool:
     return bool(_TS_RE.match(name))
 
 
-def _index_path(host: str) -> Path:
-    try:
-        return safe_output_child(host) / INDEX_NAME
-    except ValueError:
-        # Return an unreadable placeholder so downstream .is_file() fails.
-        return jobs.OUTPUT_ROOT / "_invalid_" / INDEX_NAME
-
-
 def _load(host: str) -> dict:
-    p = _index_path(host)
+    # Inline barrier: resolve + is_relative_to in the same scope as the
+    # read sink so CodeQL sees the guard.
+    base = jobs.OUTPUT_ROOT.resolve()
+    try:
+        p = (jobs.OUTPUT_ROOT / host / INDEX_NAME).resolve()
+    except OSError:
+        return {}
+    if not p.is_relative_to(base):
+        return {}
     if not p.is_file():
         return {}
     try:
@@ -70,55 +63,83 @@ def _load(host: str) -> dict:
 
 
 def _atomic_write(host: str, data: dict) -> None:
+    base = jobs.OUTPUT_ROOT.resolve()
     try:
-        d = safe_output_child(host)
-    except ValueError:
+        d = (jobs.OUTPUT_ROOT / host).resolve()
+    except OSError:
+        return
+    if not d.is_relative_to(base):
         return
     if not d.is_dir():
         return
     fd, tmp_raw = tempfile.mkstemp(prefix=".index.", dir=str(d))
-    # Re-verify the mkstemp result lies under OUTPUT_ROOT before using it
-    # as a filesystem sink; see _under_root docstring.
-    tmp = _under_root(Path(tmp_raw))
-    if tmp is None:
+    # mkstemp constructs its own filename from its tainted ``dir=``
+    # input, so re-verify inline before using the returned path as a
+    # write sink.
+    try:
+        tmp = Path(tmp_raw).resolve()
+    except OSError:
         os.close(fd)
+        return
+    if not tmp.is_relative_to(base):
+        os.close(fd)
+        return
+    target = d / INDEX_NAME
+    # Defense in depth: target is derived from ``d`` which we just
+    # barrier-checked, but compute the check in the same scope as
+    # the ``os.replace`` sink so CodeQL sees it.
+    if not target.resolve().is_relative_to(base):
+        os.close(fd)
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
         return
     try:
         with os.fdopen(fd, "w") as f:
             json.dump(data, f)
-        os.replace(tmp, str(d / INDEX_NAME))
+        os.replace(str(tmp), str(target))
     except Exception:
         try:
-            os.unlink(tmp)
-        except Exception:
+            os.unlink(str(tmp))
+        except OSError:
             pass
 
 
-def _measure(snapshot_dir: Path) -> dict:
-    """Walk a snapshot dir; return {size_bytes, file_count, mtime, v}.
-    A subdir vanishing mid-walk is tolerated — we keep the partial counts
-    instead of throwing them away and returning {}."""
+def _measure_host_snapshot(host: str, ts: str) -> dict:
+    """Walk the snapshot dir for `host/ts`; return {size_bytes, file_count,
+    mtime, v}. Empty dict on escape or missing dir. A subdir vanishing
+    mid-walk is tolerated — partial counts are returned instead of zero."""
     import time as _time
     t0 = _time.monotonic()
-    logger.debug("measure start dir=%s", snapshot_dir)
-    # Re-verify the path is under OUTPUT_ROOT inline so CodeQL's
-    # path-injection tracker sees the barrier at the sink. Callers
-    # already built ``snapshot_dir`` from ``safe_output_child``, so
-    # escape here indicates either a symlink-to-outside or a bug.
-    root = _under_root(snapshot_dir)
-    if root is None:
+    base = jobs.OUTPUT_ROOT.resolve()
+    try:
+        snapshot_dir = (jobs.OUTPUT_ROOT / host / ts).resolve()
+    except OSError:
         return {}
-    snapshot_dir = root
-    size = 0
-    files = 0
+    if not snapshot_dir.is_relative_to(base):
+        return {}
     if not snapshot_dir.is_dir():
         logger.debug("measure skip (not a dir) dir=%s", snapshot_dir)
         return {}
+    logger.debug("measure start dir=%s", snapshot_dir)
+    size = 0
+    files = 0
     stack: list[Path] = [snapshot_dir]
     while stack:
         cur = stack.pop()
+        # Every iteration: re-assert the scanned directory stays
+        # inside OUTPUT_ROOT. Even though we pushed from the tree we
+        # already barrier-checked at entry, a symlink could point
+        # outward and CodeQL doesn't know that.
         try:
-            with os.scandir(cur) as it:
+            cur_resolved = cur.resolve()
+        except OSError:
+            continue
+        if not cur_resolved.is_relative_to(base):
+            continue
+        try:
+            with os.scandir(str(cur_resolved)) as it:
                 for entry in it:
                     if entry.is_dir(follow_symlinks=False):
                         stack.append(Path(entry.path))
@@ -142,29 +163,70 @@ def _measure(snapshot_dir: Path) -> dict:
             "v": SNAPSHOT_VERSION}
 
 
+def _list_snapshot_ts(host: str) -> list[str]:
+    """Enumerate valid snapshot timestamps under ``host``. Barrier is
+    inline so CodeQL sees the check at the iterdir sink."""
+    base = jobs.OUTPUT_ROOT.resolve()
+    try:
+        host_dir = (jobs.OUTPUT_ROOT / host).resolve()
+    except OSError:
+        return []
+    if not host_dir.is_relative_to(base):
+        return []
+    if not host_dir.is_dir():
+        return []
+    out: list[str] = []
+    for p in host_dir.iterdir():
+        if p.is_dir() and is_snapshot_ts(p.name):
+            out.append(p.name)
+    return out
+
+
+def _snapshot_mtime_iso(host: str, ts: str) -> Optional[str]:
+    """Barrier-checked mtime lookup for a specific snapshot dir."""
+    base = jobs.OUTPUT_ROOT.resolve()
+    try:
+        sd = (jobs.OUTPUT_ROOT / host / ts).resolve()
+    except OSError:
+        return None
+    if not sd.is_relative_to(base):
+        return None
+    try:
+        return datetime.fromtimestamp(
+            sd.stat().st_mtime, tz=timezone.utc,
+        ).replace(microsecond=0).isoformat()
+    except OSError:
+        return None
+
+
+def _snapshot_is_dir(host: str, ts: str) -> bool:
+    base = jobs.OUTPUT_ROOT.resolve()
+    try:
+        sd = (jobs.OUTPUT_ROOT / host / ts).resolve()
+    except OSError:
+        return False
+    if not sd.is_relative_to(base):
+        return False
+    return sd.is_dir()
+
+
 def refresh_index(host: str, timestamps: Optional[list[str]] = None) -> dict:
     """Refresh index entries for `timestamps` (or all snapshots if None)."""
     logger.debug("refresh_index host=%s timestamps=%s",
                  host, timestamps if timestamps else "<all>")
-    try:
-        host_dir = safe_output_child(host)
-    except ValueError:
-        return {}
-    if not host_dir.is_dir():
+    snaps = timestamps if timestamps is not None else _list_snapshot_ts(host)
+    if timestamps is None and not snaps:
+        # Empty host dir or escape — don't touch the index.
         return {}
     idx = _load(host)
-    snaps = timestamps
-    if snaps is None:
-        snaps = [p.name for p in host_dir.iterdir() if p.is_dir() and is_snapshot_ts(p.name)]
     changed = False
     for ts in snaps:
-        sd = _under_root(host_dir / ts)
-        if sd is None or not sd.is_dir():
+        if not _snapshot_is_dir(host, ts):
             if ts in idx:
                 del idx[ts]
                 changed = True
             continue
-        m = _measure(sd)
+        m = _measure_host_snapshot(host, ts)
         if m and idx.get(ts) != m:
             idx[ts] = m
             changed = True
@@ -179,14 +241,15 @@ def refresh_index(host: str, timestamps: Optional[list[str]] = None) -> dict:
 def get_index(host: str) -> dict:
     """Return cached index, lazily refreshing entries whose dir mtime moved
     or whose cache predates SNAPSHOT_VERSION."""
-    try:
-        host_dir = safe_output_child(host)
-    except ValueError:
-        return {}
-    if not host_dir.is_dir():
-        return {}
-    idx = _load(host)
-    on_disk = {p.name for p in host_dir.iterdir() if p.is_dir() and is_snapshot_ts(p.name)}
+    on_disk = set(_list_snapshot_ts(host))
+    if not on_disk:
+        # Host dir missing or escape — still return cache contents if
+        # any, minus entries that no longer resolve.
+        idx = _load(host)
+        if not idx:
+            return {}
+    else:
+        idx = _load(host)
     dirty = False
     # Drop index entries whose dir was removed.
     for ts in list(idx.keys()):
@@ -194,20 +257,14 @@ def get_index(host: str) -> dict:
             del idx[ts]
             dirty = True
     for ts in on_disk:
-        sd = _under_root(host_dir / ts)
-        if sd is None:
+        if not _snapshot_is_dir(host, ts):
             continue
         cached = idx.get(ts)
         if cached and cached.get("v") == SNAPSHOT_VERSION:
-            try:
-                cur_mtime = datetime.fromtimestamp(
-                    sd.stat().st_mtime, tz=timezone.utc
-                ).replace(microsecond=0).isoformat()
-            except OSError:
-                cur_mtime = None
+            cur_mtime = _snapshot_mtime_iso(host, ts)
             if cur_mtime == cached.get("mtime"):
                 continue
-        m = _measure(sd)
+        m = _measure_host_snapshot(host, ts)
         if m and idx.get(ts) != m:
             idx[ts] = m
             dirty = True
