@@ -16,6 +16,19 @@ _CACHE: dict[str, tuple[float, list[dict]]] = {}
 _TTL = 600
 
 
+def clear_cache() -> int:
+    """Clear all CDX snapshot entries from the in-memory cache.
+
+    Returns the number of entries removed. CDX responses will be re-fetched
+    from Wayback on the next request; the normal 10-minute TTL resumes from
+    that point.
+    """
+    count = len(_CACHE)
+    _CACHE.clear()
+    logger.debug("clear_cache cleared=%d entries", count)
+    return count
+
+
 def host_of(url: str) -> str:
     h = urlparse(url).hostname or url
     return h.lower().lstrip(".")
