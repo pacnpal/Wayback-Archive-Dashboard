@@ -423,6 +423,9 @@ async def api_cache_refresh(request: Request):
     """Clear the in-memory CDX snapshot cache and rebuild every host's
     on-disk sites-index. Returns an HTMX-friendly HTML fragment so the
     dashboard can swap in a success notice without a full page reload."""
+    def _pl(n: int, singular: str, plural: str) -> str:
+        return singular if n == 1 else plural
+
     cdx_cleared = wayback.clear_cache()
     host_counts = _sites_index.refresh_all_hosts()
     hosts = len(host_counts)
@@ -434,8 +437,9 @@ async def api_cache_refresh(request: Request):
     )
     return HTMLResponse(
         f'<span style="color:var(--pico-ins-color)">'
-        f"✓ Cache refreshed — {cdx_cleared} CDX entr{'y' if cdx_cleared == 1 else 'ies'} cleared; "
-        f"{hosts} host{'s' if hosts != 1 else ''}, {snaps} snapshot{'s' if snaps != 1 else ''} re-indexed."
+        f"✓ Cache refreshed — {cdx_cleared} CDX {_pl(cdx_cleared, 'entry', 'entries')} cleared; "
+        f"{hosts} {_pl(hosts, 'host', 'hosts')}, "
+        f"{snaps} {_pl(snaps, 'snapshot', 'snapshots')} re-indexed."
         f"</span>"
     )
 
